@@ -1,10 +1,10 @@
-package org.fitznet;
+package org.fitznet.listener;
 
 import com.fasterxml.jackson.core.type.TypeReference;
 import lombok.extern.slf4j.Slf4j;
-import net.dv8tion.jda.api.EmbedBuilder;
 import net.dv8tion.jda.api.JDA;
 import net.dv8tion.jda.api.entities.Member;
+import net.dv8tion.jda.api.entities.MessageEmbed;
 import net.dv8tion.jda.api.entities.channel.concrete.TextChannel;
 import net.dv8tion.jda.api.events.guild.voice.GuildVoiceUpdateEvent;
 import net.dv8tion.jda.api.hooks.ListenerAdapter;
@@ -17,12 +17,12 @@ import java.util.HashMap;
 import java.util.Map;
 
 import static org.fitznet.util.Constants.BOT_MESSAGE_CHANNEL_ID;
+import static org.fitznet.util.Constants.TOTALLY_LEGIT_DATABASE_FILENAME;
 
 @Slf4j
 public class LoginListener extends ListenerAdapter {
     private final Map<Long, Long> serverVoiceJoinCount = new HashMap<>();
-    private final int[] loginMilestones = {1, 10, 50, 100, 500, 1000, 2000, 5000};
-    private final String totallyLegitDatabaseFileName = "serverVoiceCount.json";
+    private final int[] loginMilestones = {1, 100, 500, 1000, 2000, 5000};
     private final JDA JDA;
 
     public LoginListener(JDA jda) {
@@ -32,8 +32,8 @@ public class LoginListener extends ListenerAdapter {
 
     private void loadCountsFromFile() {
         try {
-            File file = new File(totallyLegitDatabaseFileName);
-            if (file.exists()) {
+            File file = new File(TOTALLY_LEGIT_DATABASE_FILENAME);
+            if (file.exists() && file.length() > 0) {
                 serverVoiceJoinCount.putAll(JsonUtils.MAPPER.readValue(file, new TypeReference<Map<Long, Long>>() {
                 }));
             } else {
@@ -48,7 +48,7 @@ public class LoginListener extends ListenerAdapter {
 
     private void saveCounts() {
         try {
-            JsonUtils.MAPPER.writeValue(new File(totallyLegitDatabaseFileName), serverVoiceJoinCount);
+            JsonUtils.MAPPER.writeValue(new File(TOTALLY_LEGIT_DATABASE_FILENAME), serverVoiceJoinCount);
         } catch (IOException e) {
             log.warn("Failed to save voice join counts to file", e);
         }
@@ -72,8 +72,14 @@ public class LoginListener extends ListenerAdapter {
                     if (count == milestone) {
                         TextChannel botChannel = JDA.getTextChannelById(BOT_MESSAGE_CHANNEL_ID);
                         if (botChannel != null) {
-                            EmbedBuilder embed = EmbedUtil.createMilestoneEmbed(event.getMember(), milestone);
-                            botChannel.sendMessageEmbeds(embed.build()).queue();
+                            MessageEmbed embed = EmbedUtil.createMilestoneEmbed(event.getMember(), milestone);
+                            botChannel.sendMessageEmbeds(embed)
+                                    .queue(
+                                            // success consumer
+                                            message -> log.info("Milestone message sent successfully"),
+                                            // failure consumer
+                                            error -> log.error("Failed to send milestone message", error)
+                                    );
                         } else {
                             log.error("BotChannel not found to post milestone results!");
                         }
