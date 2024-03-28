@@ -1,5 +1,6 @@
 plugins {
     id 'java'
+    id 'idea'
 }
 
 group = 'org.fitznet'
@@ -34,8 +35,20 @@ test {
     useJUnitPlatform()
 }
 
-apply plugin: 'idea'
-
 compileJava {
     options.annotationProcessorPath = configurations.annotationProcessor
+}
+
+// Create a fat/uber JAR
+jar {
+    manifest {
+        attributes(
+                'Main-Class': 'org.fitznet.Main'
+        )
+    }
+    // If you have any dependencies, you might need to include them into the JAR
+    from {
+        configurations.runtimeClasspath.collect { it.isDirectory() ? it : zipTree(it) }
+    }
+    duplicatesStrategy = 'exclude'
 }

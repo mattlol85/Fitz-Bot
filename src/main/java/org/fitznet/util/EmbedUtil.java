@@ -22,10 +22,8 @@ public class EmbedUtil {
         embed.setTitle("FITZ - NET Milestone Reached!");
         embed.setDescription(String.format("Congratulations %s! ", member.getAsMention()));
         embed.addField("Milestone Achieved", String.format("You've joined FITZ-NET **%d time(s)**!", milestoneCount), false);
-        embed.setColor(Color.decode("#1F8B4C")); // You can use Color.decode for hex colors
-        embed.setThumbnail(member.getUser().getEffectiveAvatarUrl()); // Set the user's avatar as the thumbnail
-
-        // Optionally, add a footer, timestamp, etc.
+        embed.setColor(Color.decode("#1F8B4C"));
+        embed.setThumbnail(member.getUser().getEffectiveAvatarUrl());
         embed.setFooter("Fitz-Net Milestone Achiever 1.0", member.getGuild().getIconUrl());
         embed.setTimestamp(java.time.Instant.now());
         return embed.build();
