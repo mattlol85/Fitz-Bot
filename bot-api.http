@@ -1,0 +1,17 @@
+### Get Bot Status
+GET http://localhost:8080/bot/status
+Accept: application/json
+
+###
+
+### Start Discord Bot
+POST http://localhost:8080/bot/startup
+Content-Type: application/json
+
+###
+
+### Shutdown Discord Bot
+POST http://localhost:8080/bot/shutdown
+Content-Type: application/json
+
+###

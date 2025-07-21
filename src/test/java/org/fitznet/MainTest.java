@@ -1,47 +1,36 @@
 package org.fitznet;
 
 import net.dv8tion.jda.api.JDA;
-import net.dv8tion.jda.api.JDABuilder;
-import net.dv8tion.jda.api.entities.Activity;
-import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
-import org.mockito.MockedStatic;
-import org.mockito.Mockito;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.boot.test.mock.mockito.MockBean;
+import org.springframework.test.context.TestPropertySource;
 
-import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.Mockito.*;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.mockito.Mockito.verify;
 
+@SpringBootTest
+@TestPropertySource(properties = "discord.bot.token=test-token")
 class MainTest {
-    private MockedStatic<JDABuilder> mockedJDABuilder;
 
-    @BeforeEach
-    void setUp() {
-        mockedJDABuilder = Mockito.mockStatic(JDABuilder.class);
+    @MockBean
+    private JDA mockJda;
+
+    @Autowired
+    private BotController botController;
+
+    @Test
+    void testBotControllerIsCreated() {
+        assertNotNull(botController);
     }
 
     @Test
-    void testSetupBotClient() throws InterruptedException {
-        // Prepare
-        JDABuilder mockBuilder = mock(JDABuilder.class, RETURNS_DEEP_STUBS);
-        JDA mockJda = mock(JDA.class);
+    void testShutdownEndpoint() {
+        String result = botController.shutdown();
 
-        when(JDABuilder.createDefault(anyString())).thenReturn(mockBuilder);
-        when(mockBuilder.setStatus(any())).thenReturn(mockBuilder);
-        when(mockBuilder.setActivity(any(Activity.class))).thenReturn(mockBuilder);
-        when(mockBuilder.build()).thenReturn(mockJda);
+        verify(mockJda).shutdown();
 
-        // Act
-        String token = "testToken";
-        Main.setupBotClient(token);
-
-        // Assert
-        mockedJDABuilder.verify(() -> JDABuilder.createDefault(token));
-        verify(mockBuilder).setStatus(any());
-        verify(mockBuilder).setActivity(any(Activity.class));
-        verify(mockBuilder).build();
-        verify(mockJda).addEventListener(any());
-        verify(mockJda).awaitReady();
-
-        mockedJDABuilder.close();
+        assertNotNull(result);
     }
 }

@@ -6,22 +6,37 @@ import net.dv8tion.jda.api.JDABuilder;
 import net.dv8tion.jda.api.OnlineStatus;
 import net.dv8tion.jda.api.entities.Activity;
 import org.fitznet.listener.LoginListener;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.boot.SpringApplication;
+import org.springframework.boot.autoconfigure.SpringBootApplication;
+import org.springframework.context.annotation.Bean;
 
 @Slf4j
+@SpringBootApplication
 public class Main {
-    static JDA discordBotClient;
-    public static void main(String[] args) throws InterruptedException {
-        String token = args.length != 0 ? args[0] : "KEY_HERE";
-        setupBotClient(token);
+
+    @Value("${discord.bot.token}")
+    private String botToken;
+
+    public static void main(String[] args) {
+        SpringApplication.run(Main.class, args);
     }
 
-    static void setupBotClient(String token) throws InterruptedException {
-        discordBotClient = JDABuilder.createDefault(token)
+    @Bean
+    public JDA discordBotClient() throws InterruptedException {
+        JDA jda = JDABuilder.createDefault(botToken)
                 .setStatus(OnlineStatus.ONLINE)
                 .setActivity(Activity.watching("The server... at all times"))
-                .build();
+                .build().awaitReady();
 
-        discordBotClient.addEventListener(new LoginListener(discordBotClient));
-        discordBotClient.awaitReady();
+        // Add the LoginListener after JDA is created and ready
+        jda.addEventListener(new LoginListener(jda));
+
+        return jda;
+    }
+
+    @Bean
+    public BotController botController(JDA jda, @Value("${discord.bot.token}") String token) {
+        return new BotController(jda, token);
     }
 }

@@ -67,7 +67,7 @@ public class LoginListener extends ListenerAdapter {
                 long count = serverVoiceJoinCount.getOrDefault(user.getIdLong(), 0L) + 1;
                 serverVoiceJoinCount.put(user.getIdLong(), count);
 
-                log.debug("Server Stats" + serverVoiceJoinCount);
+                log.debug("Server Stats{}", serverVoiceJoinCount);
                 for (int milestone : loginMilestones) {
                     if (count == milestone) {
                         TextChannel botChannel = JDA.getTextChannelById(BOT_MESSAGE_CHANNEL_ID);
