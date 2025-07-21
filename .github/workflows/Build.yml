@@ -1,14 +1,194 @@
-name: Build Gradle
+name: 🏗️ Build and Tag
 
-on: push
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+    branches: [ main, master ]
+
+permissions:
+  contents: write
+  actions: write
 
 jobs:
-  Build:
+  build-and-test:
+    name: 🧪 Build & Test
     runs-on: ubuntu-latest
+
+    outputs:
+      should-tag: ${{ steps.check-branch.outputs.should-tag }}
+
     steps:
-      - name: Checkout branch
-        uses: actions/checkout@v3
-      - name: Setup Gradle
-        uses: gradle/gradle-build-action@v2
-      - name: Run build with Gradle Wrapper
-        run: ./gradlew build
+    - name: 📥 Checkout code
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0  # Fetch all history for tags
+
+    - name: ☕ Set up JDK 17
+      uses: actions/setup-java@v4
+      with:
+        java-version: '17'
+        distribution: 'temurin'
+
+    - name: 🔧 Setup Gradle
+      uses: gradle/gradle-build-action@v2
+
+    - name: 🔨 Make gradlew executable
+      run: chmod +x ./gradlew
+
+    - name: 🧪 Run tests
+      run: |
+        echo "::group::Running tests"
+        ./gradlew test --console=plain
+        echo "::endgroup::"
+
+    - name: 🏗️ Build application
+      run: |
+        echo "::group::Building application"
+        ./gradlew build --console=plain
+        echo "::endgroup::"
+
+    - name: ✅ Build completed successfully
+      run: echo "✅ Build and tests passed successfully!"
+
+    - name: 🎯 Check if we should create tag
+      id: check-branch
+      run: |
+        if [[ "${{ github.ref }}" == "refs/heads/main" || "${{ github.ref }}" == "refs/heads/master" ]] && [[ "${{ github.event_name }}" == "push" ]]; then
+          echo "should-tag=true" >> $GITHUB_OUTPUT
+          echo "🏷️ Will create tag after successful build"
+        else
+          echo "should-tag=false" >> $GITHUB_OUTPUT
+          echo "⏭️ Skipping tag creation (not main/master branch or not a push)"
+        fi
+
+  create-tag:
+    name: 🏷️ Create Tag & Release
+    needs: build-and-test
+    runs-on: ubuntu-latest
+    if: needs.build-and-test.outputs.should-tag == 'true'
+
+    steps:
+    - name: 📥 Checkout code
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+        token: ${{ secrets.GITHUB_TOKEN }}
+
+    - name: 🔍 Get latest tag
+      id: get-latest-tag
+      run: |
+        echo "::group::Finding latest tag"
+        # Get the latest tag, or default to v0.0.0 if no tags exist
+        LATEST_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "v0.0.0")
+        echo "latest-tag=$LATEST_TAG" >> $GITHUB_OUTPUT
+        echo "📌 Latest tag: $LATEST_TAG"
+        echo "::endgroup::"
+
+    - name: 🧮 Calculate new version
+      id: calc-version
+      run: |
+        echo "::group::Calculating new version"
+        LATEST_TAG="${{ steps.get-latest-tag.outputs.latest-tag }}"
+        
+        # Remove 'v' prefix if present
+        VERSION=${LATEST_TAG#v}
+        
+        # Split version into parts
+        IFS='.' read -ra VERSION_PARTS <<< "$VERSION"
+        MAJOR=${VERSION_PARTS[0]:-0}
+        MINOR=${VERSION_PARTS[1]:-0}
+        PATCH=${VERSION_PARTS[2]:-0}
+        
+        # Check commit message for version increment type
+        COMMIT_MSG="${{ github.event.head_commit.message }}"
+        echo "📝 Commit message: $COMMIT_MSG"
+        
+        if [[ $COMMIT_MSG =~ ^major|major\( ]]; then
+          NEW_MAJOR=$((MAJOR + 1))
+          NEW_MINOR=0
+          NEW_PATCH=0
+          INCREMENT_TYPE="major"
+          EMOJI="🚀"
+        elif [[ $COMMIT_MSG =~ ^fix\(|^fix: ]]; then
+          NEW_MAJOR=$MAJOR
+          NEW_MINOR=$MINOR
+          NEW_PATCH=$((PATCH + 1))
+          INCREMENT_TYPE="patch"
+          EMOJI="🐛"
+        elif [[ $COMMIT_MSG =~ ^chore\( ]]; then
+          NEW_MAJOR=$MAJOR
+          NEW_MINOR=$MINOR
+          NEW_PATCH=$((PATCH + 1))
+          INCREMENT_TYPE="patch"
+          EMOJI="🔧"
+        else
+          # Default: increment minor (for feat, regular commits, etc.)
+          NEW_MAJOR=$MAJOR
+          NEW_MINOR=$((MINOR + 1))
+          NEW_PATCH=0
+          INCREMENT_TYPE="minor"
+          EMOJI="✨"
+        fi
+        
+        NEW_VERSION="v$NEW_MAJOR.$NEW_MINOR.$NEW_PATCH"
+        
+        echo "new-version=$NEW_VERSION" >> $GITHUB_OUTPUT
+        echo "increment-type=$INCREMENT_TYPE" >> $GITHUB_OUTPUT
+        echo "emoji=$EMOJI" >> $GITHUB_OUTPUT
+        echo "$EMOJI Incrementing $INCREMENT_TYPE version: $LATEST_TAG → $NEW_VERSION"
+        echo "::endgroup::"
+
+    - name: 🏷️ Create and push tag
+      id: create-tag
+      run: |
+        echo "::group::Creating Git tag"
+        NEW_VERSION="${{ steps.calc-version.outputs.new-version }}"
+        INCREMENT_TYPE="${{ steps.calc-version.outputs.increment-type }}"
+        EMOJI="${{ steps.calc-version.outputs.emoji }}"
+        
+        # Configure git
+        git config user.name "github-actions[bot]"
+        git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+        
+        # Create annotated tag
+        git tag -a "$NEW_VERSION" -m "$EMOJI Auto-increment $INCREMENT_TYPE version to $NEW_VERSION
+        
+        Build: ${{ github.run_number }}
+        Commit: ${{ github.sha }}
+        Triggered by: ${{ github.actor }}"
+        
+        # Push the tag
+        git push origin "$NEW_VERSION"
+        
+        echo "✅ Created and pushed tag: $NEW_VERSION"
+        echo "tag-created=$NEW_VERSION" >> $GITHUB_OUTPUT
+        echo "::endgroup::"
+
+    - name: 📦 Create GitHub Release
+      env:
+        GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      run: |
+        echo "::group::Creating GitHub Release"
+        NEW_VERSION="${{ steps.calc-version.outputs.new-version }}"
+        INCREMENT_TYPE="${{ steps.calc-version.outputs.increment-type }}"
+        EMOJI="${{ steps.calc-version.outputs.emoji }}"
+        
+        gh release create "$NEW_VERSION" \
+          --title "$EMOJI Release $NEW_VERSION" \
+          --notes "## $EMOJI Changes
+        Auto-generated release for **$NEW_VERSION**
+        
+        **📈 Increment Type:** $INCREMENT_TYPE  
+        **🔨 Build:** #${{ github.run_number }}  
+        **📝 Commit:** \`${{ github.sha }}\`  
+        **👤 Triggered by:** ${{ github.actor }}
+        
+        ### 💬 Commit Message
+        \`\`\`
+        ${{ github.event.head_commit.message }}
+        \`\`\`"
+        
+        echo "✅ GitHub Release created successfully!"
+        echo "🔗 View release: https://github.com/${{ github.repository }}/releases/tag/$NEW_VERSION"
+        echo "::endgroup::"

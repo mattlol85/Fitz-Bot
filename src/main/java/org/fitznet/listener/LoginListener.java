@@ -10,6 +10,7 @@ import net.dv8tion.jda.api.events.guild.voice.GuildVoiceUpdateEvent;
 import net.dv8tion.jda.api.hooks.ListenerAdapter;
 import org.fitznet.util.EmbedUtil;
 import org.fitznet.util.JsonUtils;
+import org.jetbrains.annotations.NotNull;
 
 import java.io.File;
 import java.io.IOException;
@@ -55,9 +56,13 @@ public class LoginListener extends ListenerAdapter {
     }
 
     @Override
-    public void onGuildVoiceUpdate(GuildVoiceUpdateEvent event) {
+    public void onGuildVoiceUpdate(@NotNull GuildVoiceUpdateEvent event) {
 
         // Server Login Counter
+        incrementLoginCounter(event);
+    }
+
+    private void incrementLoginCounter(GuildVoiceUpdateEvent event) {
         if (event.getChannelLeft() == null) {
             Member user = event.getMember();
             log.info("User {} has joined a {} voice channel {} time(s).", event.getGuild().getName(),
