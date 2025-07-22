@@ -2,10 +2,7 @@ package org.fitznet;
 
 import lombok.extern.slf4j.Slf4j;
 import net.dv8tion.jda.api.JDA;
-import net.dv8tion.jda.api.JDABuilder;
-import net.dv8tion.jda.api.OnlineStatus;
-import net.dv8tion.jda.api.entities.Activity;
-import org.fitznet.listener.LoginListener;
+import org.fitznet.util.JdaConfiguration;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
@@ -24,15 +21,7 @@ public class Main {
 
     @Bean
     public JDA discordBotClient() throws InterruptedException {
-        JDA jda = JDABuilder.createDefault(botToken)
-                .setStatus(OnlineStatus.ONLINE)
-                .setActivity(Activity.watching("The server... at all times"))
-                .build().awaitReady();
-
-        // Add the LoginListener after JDA is created and ready
-        jda.addEventListener(new LoginListener(jda));
-
-        return jda;
+        return JdaConfiguration.createConfiguredJda(botToken);
     }
 
     @Bean

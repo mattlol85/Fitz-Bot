@@ -1,10 +1,7 @@
 package org.fitznet;
 
 import net.dv8tion.jda.api.JDA;
-import net.dv8tion.jda.api.JDABuilder;
-import net.dv8tion.jda.api.OnlineStatus;
-import net.dv8tion.jda.api.entities.Activity;
-import org.fitznet.listener.LoginListener;
+import org.fitznet.util.JdaConfiguration;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -26,14 +23,7 @@ public class BotController {
     public String startup() {
         if (jda == null || jda.getStatus() == JDA.Status.SHUTDOWN) {
             try {
-                jda = JDABuilder.createDefault(token)
-                        .setStatus(OnlineStatus.ONLINE)
-                        .setActivity(Activity.watching("The server... at all times"))
-                        .build().awaitReady();
-
-                // Add the LoginListener after JDA is ready
-                jda.addEventListener(new LoginListener(jda));
-
+                jda = JdaConfiguration.createConfiguredJda(token);
                 return "Bot started successfully.";
             } catch (InterruptedException e) {
                 Thread.currentThread().interrupt();
