@@ -21,7 +21,6 @@ dependencies {
     annotationProcessor 'org.projectlombok:lombok:1.18.30'
     testImplementation 'dev.coly:JDATesting:0.6.0'
 
-    // Spring Boot starters (versions managed by Spring Boot plugin)
     implementation 'org.springframework.boot:spring-boot-starter-web'
     testImplementation 'org.springframework.boot:spring-boot-starter-test'
 

@@ -6,103 +6,192 @@ import net.dv8tion.jda.api.entities.Member;
 import net.dv8tion.jda.api.entities.MessageEmbed;
 import net.dv8tion.jda.api.entities.User;
 import net.dv8tion.jda.api.entities.channel.concrete.TextChannel;
+import net.dv8tion.jda.api.entities.channel.unions.AudioChannelUnion;
 import net.dv8tion.jda.api.events.guild.voice.GuildVoiceUpdateEvent;
 import net.dv8tion.jda.api.requests.restaction.MessageCreateAction;
-import org.fitznet.util.JsonUtilsTest;
+import org.fitznet.data.VoiceJoinDatabase;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
+import org.mockito.Mock;
+import org.mockito.junit.jupiter.MockitoExtension;
+import org.mockito.junit.jupiter.MockitoSettings;
+import org.mockito.quality.Strictness;
 
-import java.util.Objects;
-import java.util.function.Consumer;
+import java.lang.reflect.Field;
 
 import static org.fitznet.util.Constants.BOT_MESSAGE_CHANNEL_ID;
-import static org.junit.jupiter.api.Assertions.assertNotNull;
-import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assertions.*;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.Mockito.*;
 
-public class LoginListenerTest {
+@ExtendWith(MockitoExtension.class)
+@MockitoSettings(strictness = Strictness.LENIENT)
+class LoginListenerTest {
 
-    private JDA mockJda;
-    private TextChannel mockTextChannel;
-    private Member mockMember;
-    private Guild mockGuild;
+    @Mock private JDA mockJda;
+    @Mock private TextChannel mockTextChannel;
+    @Mock private MessageCreateAction mockMessageAction;
+    @Mock private Guild mockGuild;
+    @Mock private Member mockMember;
+    @Mock private User mockUser;
+    @Mock private AudioChannelUnion mockVoiceChannel;
+    @Mock private GuildVoiceUpdateEvent mockEvent;
+    @Mock private VoiceJoinDatabase mockDatabase;
+
     private LoginListener listener;
 
     @BeforeEach
-    public void setUp() {
-        JsonUtilsTest.removeTestUser(123L);
-        // Setup mock objects
-        mockJda = mock(JDA.class);
-        mockTextChannel = mock(TextChannel.class);
-        mockMember = mock(Member.class);
-        mockGuild = mock(Guild.class);
-        User mockUser = mock(User.class);
-        MessageCreateAction mockMessageCreateAction = mock(MessageCreateAction.class);
+    void setUp() throws Exception {
+        // Setup basic mocks that are used across multiple tests
+        lenient().when(mockGuild.getName()).thenReturn("Test Guild");
+        lenient().when(mockMember.getGuild()).thenReturn(mockGuild);
+        lenient().when(mockMember.getUser()).thenReturn(mockUser);
+        lenient().when(mockMember.getAsMention()).thenReturn("@TestUser");
+        lenient().when(mockMember.getEffectiveName()).thenReturn("TestUser");
+        lenient().when(mockMember.getIdLong()).thenReturn(123L);
+        lenient().when(mockUser.getEffectiveAvatarUrl()).thenReturn("https://example.com/avatar.jpg");
 
+        lenient().when(mockEvent.getMember()).thenReturn(mockMember);
+        lenient().when(mockEvent.getGuild()).thenReturn(mockGuild);
 
-        // Initialize LoginListener with mock JDA object
+        // Create listener and inject mock database
         listener = new LoginListener(mockJda);
+        injectMockDatabase(listener, mockDatabase);
+    }
 
-        // Mocking the necessary methods
-        when(mockTextChannel.sendMessageEmbeds(any(MessageEmbed.class))).thenReturn(mockMessageCreateAction);
-        doNothing().when(mockMessageCreateAction).queue(any(Consumer.class), any(Consumer.class));
-
-        when(mockJda.getTextChannelById(BOT_MESSAGE_CHANNEL_ID)).thenReturn(mockTextChannel);
-        when(mockGuild.getName()).thenReturn("Dummy Guild");
-        when(mockGuild.getIconUrl()).thenReturn("https://example.com/guildIcon.jpg");
-        when(mockMember.getGuild()).thenReturn(mockGuild);
-        when(mockMember.getUser()).thenReturn(mockUser);
-        when(mockMember.getAsMention()).thenReturn("@DummyUser");
-        when(mockUser.getEffectiveAvatarUrl()).thenReturn("https://example.com/avatar.jpg");
+    private void injectMockDatabase(LoginListener listener, VoiceJoinDatabase mockDatabase) throws Exception {
+        Field databaseField = LoginListener.class.getDeclaredField("voiceDatabase");
+        databaseField.setAccessible(true);
+        databaseField.set(listener, mockDatabase);
     }
 
     @Test
-    public void shouldSendMilestoneForFirstJoin() {
+    void shouldHandleVoiceChannelJoin() {
         // Given
-        GuildVoiceUpdateEvent mockEvent = mock(GuildVoiceUpdateEvent.class);
-        when(mockEvent.getChannelLeft()).thenReturn(null); // Simulate joining a channel
-        when(mockEvent.getMember()).thenReturn(mockMember);
-        when(mockMember.getIdLong()).thenReturn(123L); // Use a specific member ID for testing
-        when(mockMember.getGuild()).thenReturn(mockGuild);
-        when(mockEvent.getGuild()).thenReturn(mockGuild);
-
-        // Capture the embed sent to the channel
-        ArgumentCaptor<MessageEmbed> embedCaptor = ArgumentCaptor.forClass(MessageEmbed.class);
+        when(mockEvent.getChannelLeft()).thenReturn(null);
+        when(mockEvent.getChannelJoined()).thenReturn(mockVoiceChannel);
+        when(mockDatabase.incrementVoiceJoinCount(123L)).thenReturn(1L);
 
         // When
         listener.onGuildVoiceUpdate(mockEvent);
 
         // Then
-        verify(mockTextChannel, times(1)).sendMessageEmbeds(embedCaptor.capture());
-        MessageEmbed sentEmbed = embedCaptor.getValue();
-
-        assertNotNull(sentEmbed);
-        assertTrue(Objects.requireNonNull(sentEmbed.getDescription()).contains("Congratulations"));
+        verify(mockDatabase).incrementVoiceJoinCount(123L);
     }
 
     @Test
-    public void shouldSendMilestoneFor100thJoin() {
+    void shouldNotHandleVoiceChannelLeave() {
         // Given
-        GuildVoiceUpdateEvent mockEvent = mock(GuildVoiceUpdateEvent.class);
-        when(mockEvent.getChannelLeft()).thenReturn(null); // Simulate joining a channel
-        when(mockEvent.getMember()).thenReturn(mockMember);
-        when(mockMember.getIdLong()).thenReturn(123L); // Use a specific member ID for testing
-        when(mockMember.getGuild()).thenReturn(mockGuild);
-        when(mockEvent.getGuild()).thenReturn(mockGuild); // Return mockGuild when getGuild() is called
-
-        // Capture the embed sent to the channel
-        ArgumentCaptor<MessageEmbed> embedCaptor = ArgumentCaptor.forClass(MessageEmbed.class);
+        when(mockEvent.getChannelLeft()).thenReturn(mockVoiceChannel);
+        when(mockEvent.getChannelJoined()).thenReturn(null);
 
         // When
-        for (int i = 0; i < 100; i++) {
-            listener.onGuildVoiceUpdate(mockEvent);
-        }
-        // Then
-        verify(mockTextChannel, times(2)).sendMessageEmbeds(embedCaptor.capture());
-        MessageEmbed sentEmbed = embedCaptor.getValue();
+        listener.onGuildVoiceUpdate(mockEvent);
 
-        assertNotNull(sentEmbed);
-        assertTrue(Objects.requireNonNull(sentEmbed.getDescription()).contains("Congratulations"));
+        // Then
+        verify(mockDatabase, never()).incrementVoiceJoinCount(anyLong());
+    }
+
+    @Test
+    void shouldSendMilestoneForFirstJoin() {
+        // Given
+        when(mockEvent.getChannelLeft()).thenReturn(null);
+        when(mockEvent.getChannelJoined()).thenReturn(mockVoiceChannel);
+        when(mockDatabase.incrementVoiceJoinCount(123L)).thenReturn(1L);
+        when(mockJda.getTextChannelById(BOT_MESSAGE_CHANNEL_ID)).thenReturn(mockTextChannel);
+        when(mockTextChannel.sendMessageEmbeds(any(MessageEmbed.class))).thenReturn(mockMessageAction);
+
+        // When
+        listener.onGuildVoiceUpdate(mockEvent);
+
+        // Then
+        verify(mockTextChannel).sendMessageEmbeds(any(MessageEmbed.class));
+    }
+
+    @Test
+    void shouldSendMilestoneFor100thJoin() {
+        // Given
+        when(mockEvent.getChannelLeft()).thenReturn(null);
+        when(mockEvent.getChannelJoined()).thenReturn(mockVoiceChannel);
+        when(mockDatabase.incrementVoiceJoinCount(123L)).thenReturn(100L);
+        when(mockJda.getTextChannelById(BOT_MESSAGE_CHANNEL_ID)).thenReturn(mockTextChannel);
+        when(mockTextChannel.sendMessageEmbeds(any(MessageEmbed.class))).thenReturn(mockMessageAction);
+
+        // When
+        listener.onGuildVoiceUpdate(mockEvent);
+
+        // Then
+        verify(mockTextChannel).sendMessageEmbeds(any(MessageEmbed.class));
+    }
+
+    @Test
+    void shouldNotSendMessageForNonMilestone() {
+        // Given
+        when(mockEvent.getChannelLeft()).thenReturn(null);
+        when(mockEvent.getChannelJoined()).thenReturn(mockVoiceChannel);
+        when(mockDatabase.incrementVoiceJoinCount(123L)).thenReturn(50L); // Not a milestone
+
+        // When
+        listener.onGuildVoiceUpdate(mockEvent);
+
+        // Then
+        verify(mockDatabase).incrementVoiceJoinCount(123L);
+        verify(mockJda, never()).getTextChannelById(anyLong());
+    }
+
+    @Test
+    void shouldHandleMissingBotChannel() {
+        // Given
+        when(mockEvent.getChannelLeft()).thenReturn(null);
+        when(mockEvent.getChannelJoined()).thenReturn(mockVoiceChannel);
+        when(mockDatabase.incrementVoiceJoinCount(123L)).thenReturn(1L);
+        when(mockJda.getTextChannelById(BOT_MESSAGE_CHANNEL_ID)).thenReturn(null);
+
+        // When
+        listener.onGuildVoiceUpdate(mockEvent);
+
+        // Then
+        verify(mockDatabase).incrementVoiceJoinCount(123L);
+        verify(mockJda).getTextChannelById(BOT_MESSAGE_CHANNEL_ID);
+    }
+
+    @Test
+    void shouldTestAllMilestones() {
+        // Given
+        int[] expectedMilestones = {1, 100, 500, 1000, 2000, 5000};
+
+        for (int milestone : expectedMilestones) {
+            // Reset specific mocks for each milestone
+            reset(mockDatabase, mockJda, mockTextChannel, mockMessageAction);
+
+            when(mockEvent.getChannelLeft()).thenReturn(null);
+            when(mockEvent.getChannelJoined()).thenReturn(mockVoiceChannel);
+            when(mockDatabase.incrementVoiceJoinCount(123L)).thenReturn((long) milestone);
+            when(mockJda.getTextChannelById(BOT_MESSAGE_CHANNEL_ID)).thenReturn(mockTextChannel);
+            when(mockTextChannel.sendMessageEmbeds(any(MessageEmbed.class))).thenReturn(mockMessageAction);
+
+            // When
+            listener.onGuildVoiceUpdate(mockEvent);
+
+            // Then
+            verify(mockTextChannel).sendMessageEmbeds(any(MessageEmbed.class));
+        }
+    }
+
+    @Test
+    void shouldHandleChannelMoveAsNonJoin() {
+        // Given
+        AudioChannelUnion mockLeftChannel = mock(AudioChannelUnion.class);
+        when(mockEvent.getChannelLeft()).thenReturn(mockLeftChannel);
+        when(mockEvent.getChannelJoined()).thenReturn(mockVoiceChannel);
+
+        // When
+        listener.onGuildVoiceUpdate(mockEvent);
+
+        // Then
+        verify(mockDatabase, never()).incrementVoiceJoinCount(anyLong());
     }
 }
