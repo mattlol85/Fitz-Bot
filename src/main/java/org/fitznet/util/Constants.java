@@ -1,7 +1,5 @@
 package org.fitznet.util;
 
 public class Constants {
-    public static final Long BOT_MESSAGE_CHANNEL_ID = 1216911261703340125L;
-    public static final String TOTALLY_LEGIT_DATABASE_FILENAME = "serverVoiceCount.json";
-
+    public static final int[] DEFAULT_MILESTONES = {1, 5, 10, 25, 50, 100, 250, 500, 1000};
 }

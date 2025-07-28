@@ -1,0 +1,161 @@
+package org.fitznet.data;
+
+import com.fasterxml.jackson.core.type.TypeReference;
+import lombok.extern.slf4j.Slf4j;
+import org.fitznet.data.model.GuildConfig;
+import org.fitznet.util.Constants;
+import org.fitznet.util.JsonUtils;
+
+import java.io.File;
+import java.io.IOException;
+import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
+
+/**
+ * Database for storing guild-specific configuration settings.
+ * Each guild can have its own bot channel and other settings.
+ */
+@Slf4j
+public class GuildConfigDatabase {
+    private final Map<Long, GuildConfig> guildConfigs = new ConcurrentHashMap<>();
+    private final String configFile;
+
+    public GuildConfigDatabase() {
+        this.configFile = "data/guild_configs.json";
+        createDataDirectory();
+        loadConfigs();
+    }
+
+    /**
+     * Creates the data directory if it doesn't exist.
+     */
+    private void createDataDirectory() {
+        File dir = new File("data");
+        log.info("Checking data directory at: {}", dir.getAbsolutePath());
+
+        if (!dir.exists()) {
+            boolean created = dir.mkdirs();
+            log.info("Created data directory: {} at path: {}", created, dir.getAbsolutePath());
+        } else {
+            log.info("Data directory already exists at: {}", dir.getAbsolutePath());
+        }
+    }
+
+    /**
+     * Loads guild configurations from JSON file.
+     */
+    private void loadConfigs() {
+        try {
+            File file = new File(configFile);
+            log.info("Loading config from: {}", file.getAbsolutePath());
+
+            if (file.exists() && file.length() > 0) {
+                Map<Long, GuildConfig> loadedConfigs = JsonUtils.MAPPER.readValue(file, new TypeReference<>() {});
+                guildConfigs.putAll(loadedConfigs);
+                log.info("Loaded configurations for {} guilds from {}", loadedConfigs.size(), file.getAbsolutePath());
+            } else {
+                if (!file.exists()) {
+                    // Ensure parent directory exists
+                    file.getParentFile().mkdirs();
+                    boolean created = file.createNewFile();
+                    log.info("Created new guild config file: {} at {}", created, file.getAbsolutePath());
+                } else {
+                    log.info("Config file exists but is empty: {}", file.getAbsolutePath());
+                }
+            }
+        } catch (IOException e) {
+            log.error("Failed to load guild configurations from {}. Starting with empty configs.", configFile, e);
+        }
+    }
+
+    /**
+     * Saves guild configurations to JSON file.
+     */
+    private void saveConfigs() {
+        try {
+            JsonUtils.MAPPER.writeValue(new File(configFile), guildConfigs);
+            log.debug("Guild configurations saved successfully");
+        } catch (IOException e) {
+            log.warn("Failed to save guild configurations", e);
+        }
+    }
+
+    /**
+     * Gets the bot channel ID for a specific guild.
+     *
+     * @param guildId the Discord guild ID
+     * @return the bot channel ID, or null if not configured
+     */
+    public Long getBotChannelId(long guildId) {
+        GuildConfig config = guildConfigs.get(guildId);
+        return config != null ? config.getBotChannelId() : null;
+    }
+
+    /**
+     * Sets the bot channel ID for a specific guild.
+     *
+     * @param guildId the Discord guild ID
+     * @param channelId the Discord channel ID
+     */
+    public void setBotChannelId(long guildId, long channelId) {
+        GuildConfig config = guildConfigs.computeIfAbsent(guildId, k -> new GuildConfig());
+        config.setBotChannelId(channelId);
+        saveConfigs();
+        log.info("Set bot channel for guild {} to {}", guildId, channelId);
+    }
+
+    /**
+     * Gets the milestone thresholds for a specific guild.
+     *
+     * @param guildId the Discord guild ID
+     * @return array of milestone thresholds, or default values if not configured
+     */
+    public int[] getMilestones(long guildId) {
+        GuildConfig config = guildConfigs.get(guildId);
+        return config != null ? config.getMilestonesOrDefault() : Constants.DEFAULT_MILESTONES;
+    }
+
+    /**
+     * Sets custom milestone thresholds for a specific guild.
+     *
+     * @param guildId the Discord guild ID
+     * @param milestones array of milestone thresholds
+     */
+    public void setMilestones(long guildId, int[] milestones) {
+        GuildConfig config = guildConfigs.computeIfAbsent(guildId, k -> new GuildConfig());
+        config.setMilestones(milestones);
+        saveConfigs();
+        log.info("Set custom milestones for guild {}: {}", guildId, milestones);
+    }
+
+    /**
+     * Checks if a guild has any configuration.
+     *
+     * @param guildId the Discord guild ID
+     * @return true if guild has configuration, false otherwise
+     */
+    public boolean hasConfig(long guildId) {
+        return guildConfigs.containsKey(guildId);
+    }
+
+    /**
+     * Gets the complete configuration for a guild.
+     *
+     * @param guildId the Discord guild ID
+     * @return guild configuration or null if not found
+     */
+    public GuildConfig getGuildConfig(long guildId) {
+        return guildConfigs.get(guildId);
+    }
+
+    /**
+     * Removes all configuration for a guild.
+     *
+     * @param guildId the Discord guild ID
+     */
+    public void removeGuildConfig(long guildId) {
+        guildConfigs.remove(guildId);
+        saveConfigs();
+        log.info("Removed configuration for guild {}", guildId);
+    }
+}

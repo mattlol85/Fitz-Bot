@@ -10,17 +10,15 @@ version = '0.1.0-SNAPSHOT'
 repositories {
     mavenCentral()
     maven { url 'https://m2.coly.dev/releases' }
-
 }
 
 dependencies {
-    implementation("net.dv8tion:JDA:5.0.0-beta.21")
+    implementation("net.dv8tion:JDA:5.0.0-beta.21") {
+        exclude module: 'opus-java' // not needed for text-only bot
+        exclude module: 'tink' // not needed for text-only bot
+    }
     compileOnly 'org.projectlombok:lombok:1.18.30'
     implementation 'com.fasterxml.jackson.core:jackson-databind:2.16.1'
-
-    annotationProcessor 'org.projectlombok:lombok:1.18.30'
-    testImplementation 'dev.coly:JDATesting:0.6.0'
-
     implementation 'org.springframework.boot:spring-boot-starter-web'
     testImplementation 'org.springframework.boot:spring-boot-starter-test'
 
@@ -29,10 +27,34 @@ dependencies {
     testImplementation 'junit:junit:4.13.2'
     testCompileOnly 'org.projectlombok:lombok:1.18.30'
     testAnnotationProcessor 'org.projectlombok:lombok:1.18.30'
+    annotationProcessor 'org.projectlombok:lombok:1.18.30'
 }
 
 test {
     useJUnitPlatform()
+    
+    // Enable parallel test execution
+    systemProperty 'junit.jupiter.execution.parallel.enabled', 'true'
+    systemProperty 'junit.jupiter.execution.parallel.mode.default', 'concurrent'
+    systemProperty 'junit.jupiter.execution.parallel.mode.classes.default', 'concurrent'
+    
+    // Configure thread pool size (adjust based on your CPU cores)
+    systemProperty 'junit.jupiter.execution.parallel.config.strategy', 'dynamic'
+    systemProperty 'junit.jupiter.execution.parallel.config.dynamic.factor', '2'
+    
+    // Use multiple worker processes for better isolation
+    maxParallelForks = Runtime.runtime.availableProcessors().intdiv(2) ?: 1
+    
+    // Increase memory for parallel execution
+    minHeapSize = "256m"
+    maxHeapSize = "1g"
+    
+    // Show test results in real-time
+    testLogging {
+        events "passed", "skipped", "failed"
+        exceptionFormat "short"
+        showStandardStreams = false
+    }
 }
 
 apply plugin: 'idea'

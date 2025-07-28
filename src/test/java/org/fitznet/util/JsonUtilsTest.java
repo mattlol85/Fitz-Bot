@@ -17,6 +17,7 @@ import static org.junit.jupiter.api.Assertions.*;
 @Slf4j
 public class JsonUtilsTest {
     private static final ObjectMapper MAPPER = new ObjectMapper();
+    private static final String TEST_DATABASE_FILENAME = "test_database.json";
 
     @Test
     void testMapperIsNotNull() {
@@ -24,8 +25,8 @@ public class JsonUtilsTest {
     }
 
     @Test
-    void testRemoveTestUserWithValidFile(@TempDir Path tempDir) throws IOException {
-        File testFile = tempDir.resolve("test_database.json").toFile();
+    void testMapperCanReadWriteJson(@TempDir Path tempDir) throws IOException {
+        File testFile = tempDir.resolve(TEST_DATABASE_FILENAME).toFile();
 
         Map<Long, Long> testData = new HashMap<>();
         testData.put(123L, 5L);
@@ -37,27 +38,14 @@ public class JsonUtilsTest {
         Map<Long, Long> readData = MAPPER.readValue(testFile, new TypeReference<>() {});
         assertEquals(2, readData.size());
         assertTrue(readData.containsKey(123L));
+        assertEquals(5L, readData.get(123L));
+        assertEquals(10L, readData.get(456L));
     }
 
-    public static void removeTestUser(Long userId) {
-        File file = new File(Constants.TOTALLY_LEGIT_DATABASE_FILENAME);
-        try {
-            if (file.exists()) {
-                Map<Long, Long> counts = MAPPER.readValue(file, new TypeReference<>() {});
-
-                if (counts.containsKey(userId)) {
-                    counts.remove(userId);
-                    // Save the updated data back to the file
-                    MAPPER.writeValue(file, counts);
-                    log.info("User with ID {} has been removed.", userId);
-                } else {
-                    log.info("User with ID {} not found.", userId);
-                }
-            } else {
-                log.error("File not found: " + Constants.TOTALLY_LEGIT_DATABASE_FILENAME);
-            }
-        } catch (IOException e) {
-            log.error("Error processing file: {}", e.getMessage());
-        }
+    @Test
+    void testJsonUtilsMapper() {
+        assertNotNull(JsonUtils.MAPPER);
+        assertSame(ObjectMapper.class, JsonUtils.MAPPER.getClass());
     }
+
 }
