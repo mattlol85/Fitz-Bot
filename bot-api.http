@@ -1,17 +1,23 @@
-### Get Bot Status
-GET http://localhost:8080/bot/status
-Accept: application/json
+# Bot Management API
 
-###
-
-### Start Discord Bot
+### Start the bot
 POST http://localhost:8080/bot/startup
 Content-Type: application/json
 
-###
+### Get bot status
+GET http://localhost:8080/bot/status
 
-### Shutdown Discord Bot
+### Stop the bot
 POST http://localhost:8080/bot/shutdown
-Content-Type: application/json
 
-###
+### Force update commands for all guilds (INSTANT)
+POST http://localhost:8080/bot/force-update-commands
+
+### Register commands for a specific guild (INSTANT)
+# Replace YOUR_GUILD_ID with your Discord server ID
+POST http://localhost:8080/bot/register-guild-commands/YOUR_GUILD_ID
+
+
+### Example with a real guild ID (update this with your server ID)
+# To get your guild ID: Enable Developer Mode in Discord → Right-click your server → Copy Server ID
+# POST http://localhost:8080/bot/register-guild-commands/123456789012345678

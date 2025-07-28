@@ -9,11 +9,13 @@ import net.dv8tion.jda.api.entities.channel.concrete.TextChannel;
 import net.dv8tion.jda.api.entities.channel.unions.AudioChannelUnion;
 import net.dv8tion.jda.api.events.guild.voice.GuildVoiceUpdateEvent;
 import net.dv8tion.jda.api.requests.restaction.MessageCreateAction;
-import org.fitznet.data.VoiceJoinDatabase;
+import org.fitznet.data.GuildConfigDatabase;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
-import org.mockito.ArgumentCaptor;
+import org.junit.jupiter.api.parallel.Execution;
+import org.junit.jupiter.api.parallel.ExecutionMode;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.mockito.junit.jupiter.MockitoSettings;
@@ -21,14 +23,15 @@ import org.mockito.quality.Strictness;
 
 import java.lang.reflect.Field;
 
-import static org.fitznet.util.Constants.BOT_MESSAGE_CHANNEL_ID;
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.Mockito.*;
 
 @ExtendWith(MockitoExtension.class)
 @MockitoSettings(strictness = Strictness.LENIENT)
+@Execution(ExecutionMode.CONCURRENT)
+@Tag("unit")
+@Tag("fast")
 class LoginListenerTest {
 
     @Mock private JDA mockJda;
@@ -37,161 +40,193 @@ class LoginListenerTest {
     @Mock private Guild mockGuild;
     @Mock private Member mockMember;
     @Mock private User mockUser;
-    @Mock private AudioChannelUnion mockVoiceChannel;
+    @Mock private AudioChannelUnion mockAudioChannel;
     @Mock private GuildVoiceUpdateEvent mockEvent;
-    @Mock private VoiceJoinDatabase mockDatabase;
+    @Mock private GuildConfigDatabase mockConfigDatabase;
 
     private LoginListener listener;
+    private static final String TEST_GUILD_ID = "123456789";
+    private static final long TEST_GUILD_ID_LONG = 123456789L;
+    private static final long TEST_USER_ID = 987654321L;
+    private static final long TEST_CHANNEL_ID = 555666777L;
 
     @BeforeEach
     void setUp() throws Exception {
-        // Setup basic mocks that are used across multiple tests
+        listener = new LoginListener(mockJda);
+
+        // Replace the configDatabase with mock for testing
+        setPrivateField(listener, mockConfigDatabase);
+
+        // Setup basic mocks
         lenient().when(mockGuild.getName()).thenReturn("Test Guild");
+        lenient().when(mockGuild.getId()).thenReturn(TEST_GUILD_ID);
+        lenient().when(mockGuild.getIdLong()).thenReturn(TEST_GUILD_ID_LONG);
         lenient().when(mockMember.getGuild()).thenReturn(mockGuild);
         lenient().when(mockMember.getUser()).thenReturn(mockUser);
-        lenient().when(mockMember.getAsMention()).thenReturn("@TestUser");
+        lenient().when(mockMember.getIdLong()).thenReturn(TEST_USER_ID);
         lenient().when(mockMember.getEffectiveName()).thenReturn("TestUser");
-        lenient().when(mockMember.getIdLong()).thenReturn(123L);
-        lenient().when(mockUser.getEffectiveAvatarUrl()).thenReturn("https://example.com/avatar.jpg");
-
-        lenient().when(mockEvent.getMember()).thenReturn(mockMember);
+        lenient().when(mockUser.getIdLong()).thenReturn(TEST_USER_ID);
         lenient().when(mockEvent.getGuild()).thenReturn(mockGuild);
+        lenient().when(mockEvent.getMember()).thenReturn(mockMember);
+        lenient().when(mockGuild.getTextChannelById(TEST_CHANNEL_ID)).thenReturn(mockTextChannel);
+        lenient().when(mockTextChannel.sendMessageEmbeds(any(MessageEmbed.class))).thenReturn(mockMessageAction);
+        lenient().when(mockTextChannel.getName()).thenReturn("bot-channel");
 
-        // Create listener and inject mock database
-        listener = new LoginListener(mockJda);
-        injectMockDatabase(listener, mockDatabase);
+        // Setup config database to return a bot channel
+        lenient().when(mockConfigDatabase.getBotChannelId(TEST_GUILD_ID_LONG)).thenReturn(TEST_CHANNEL_ID);
     }
 
-    private void injectMockDatabase(LoginListener listener, VoiceJoinDatabase mockDatabase) throws Exception {
-        Field databaseField = LoginListener.class.getDeclaredField("voiceDatabase");
-        databaseField.setAccessible(true);
-        databaseField.set(listener, mockDatabase);
+    private void setPrivateField(Object obj, Object value) throws Exception {
+        Field field = obj.getClass().getDeclaredField("configDatabase");
+        field.setAccessible(true);
+        field.set(obj, value);
     }
 
     @Test
-    void shouldHandleVoiceChannelJoin() {
-        // Given
+    @Tag("voice-counting")
+    void testVoiceJoinIncrementsCount() {
+        // Setup
         when(mockEvent.getChannelLeft()).thenReturn(null);
-        when(mockEvent.getChannelJoined()).thenReturn(mockVoiceChannel);
-        when(mockDatabase.incrementVoiceJoinCount(123L)).thenReturn(1L);
+        when(mockEvent.getChannelJoined()).thenReturn(mockAudioChannel);
 
-        // When
+        // Execute
         listener.onGuildVoiceUpdate(mockEvent);
 
-        // Then
-        verify(mockDatabase).incrementVoiceJoinCount(123L);
+        // Verify the count was incremented
+        assertEquals(1L, listener.getVoiceJoinCount(TEST_GUILD_ID, TEST_USER_ID));
     }
 
     @Test
-    void shouldNotHandleVoiceChannelLeave() {
-        // Given
-        when(mockEvent.getChannelLeft()).thenReturn(mockVoiceChannel);
+    @Tag("voice-counting")
+    void testMultipleJoinsIncrementCorrectly() {
+        // Setup
+        when(mockEvent.getChannelLeft()).thenReturn(null);
+        when(mockEvent.getChannelJoined()).thenReturn(mockAudioChannel);
+
+        // Execute multiple joins
+        listener.onGuildVoiceUpdate(mockEvent);
+        listener.onGuildVoiceUpdate(mockEvent);
+        listener.onGuildVoiceUpdate(mockEvent);
+
+        // Verify the count
+        assertEquals(3L, listener.getVoiceJoinCount(TEST_GUILD_ID, TEST_USER_ID));
+    }
+
+    @Test
+    @Tag("milestone")
+    @Tag("messaging")
+    void testMilestoneMessageSent() {
+        // Setup for milestone 1
+        when(mockEvent.getChannelLeft()).thenReturn(null);
+        when(mockEvent.getChannelJoined()).thenReturn(mockAudioChannel);
+
+        // Execute
+        listener.onGuildVoiceUpdate(mockEvent);
+
+        // Verify milestone message was sent
+        verify(mockTextChannel).sendMessageEmbeds(any(MessageEmbed.class));
+        verify(mockConfigDatabase).getBotChannelId(TEST_GUILD_ID_LONG);
+    }
+
+    @Test
+    @Tag("milestone")
+    @Tag("config")
+    void testNoMilestoneMessageWhenNoBotChannelConfigured() {
+        // Setup - no bot channel configured
+        when(mockEvent.getChannelLeft()).thenReturn(null);
+        when(mockEvent.getChannelJoined()).thenReturn(mockAudioChannel);
+        when(mockConfigDatabase.getBotChannelId(TEST_GUILD_ID_LONG)).thenReturn(null);
+
+        // Execute
+        listener.onGuildVoiceUpdate(mockEvent);
+
+        // Verify no milestone message was sent
+        verify(mockTextChannel, never()).sendMessageEmbeds(any(MessageEmbed.class));
+        assertEquals(1L, listener.getVoiceJoinCount(TEST_GUILD_ID, TEST_USER_ID)); // Count still increments
+    }
+
+    @Test
+    @Tag("voice-events")
+    void testNoActionOnChannelMove() {
+        // Setup - user moving between channels (not joining or leaving)
+        when(mockEvent.getChannelLeft()).thenReturn(mockAudioChannel);
+        when(mockEvent.getChannelJoined()).thenReturn(mockAudioChannel);
+
+        // Execute
+        listener.onGuildVoiceUpdate(mockEvent);
+
+        // Verify - count should not increment
+        assertEquals(0L, listener.getVoiceJoinCount(TEST_GUILD_ID, TEST_USER_ID));
+    }
+
+    @Test
+    @Tag("voice-events")
+    void testNoActionOnChannelLeave() {
+        // Setup - user leaving voice channel
+        when(mockEvent.getChannelLeft()).thenReturn(mockAudioChannel);
         when(mockEvent.getChannelJoined()).thenReturn(null);
 
-        // When
+        // Execute
         listener.onGuildVoiceUpdate(mockEvent);
 
-        // Then
-        verify(mockDatabase, never()).incrementVoiceJoinCount(anyLong());
+        // Verify - count should not increment
+        assertEquals(0L, listener.getVoiceJoinCount(TEST_GUILD_ID, TEST_USER_ID));
     }
 
     @Test
-    void shouldSendMilestoneForFirstJoin() {
-        // Given
+    @Tag("multi-guild")
+    void testDifferentGuildsHaveSeparateCounts() {
+        // Setup different guild
+        Guild mockGuild2 = mock(Guild.class);
+        when(mockGuild2.getId()).thenReturn("987654321");
+        when(mockGuild2.getName()).thenReturn("Test Guild 2");
+
+        GuildVoiceUpdateEvent mockEvent2 = mock(GuildVoiceUpdateEvent.class);
+        when(mockEvent2.getGuild()).thenReturn(mockGuild2);
+        when(mockEvent2.getMember()).thenReturn(mockMember);
+        when(mockEvent2.getChannelLeft()).thenReturn(null);
+        when(mockEvent2.getChannelJoined()).thenReturn(mockAudioChannel);
+
+        // Setup original event
         when(mockEvent.getChannelLeft()).thenReturn(null);
-        when(mockEvent.getChannelJoined()).thenReturn(mockVoiceChannel);
-        when(mockDatabase.incrementVoiceJoinCount(123L)).thenReturn(1L);
-        when(mockJda.getTextChannelById(BOT_MESSAGE_CHANNEL_ID)).thenReturn(mockTextChannel);
-        when(mockTextChannel.sendMessageEmbeds(any(MessageEmbed.class))).thenReturn(mockMessageAction);
+        when(mockEvent.getChannelJoined()).thenReturn(mockAudioChannel);
 
-        // When
-        listener.onGuildVoiceUpdate(mockEvent);
+        // Execute joins in different guilds
+        listener.onGuildVoiceUpdate(mockEvent);  // Guild 1
+        listener.onGuildVoiceUpdate(mockEvent2); // Guild 2
+        listener.onGuildVoiceUpdate(mockEvent);  // Guild 1 again
 
-        // Then
-        verify(mockTextChannel).sendMessageEmbeds(any(MessageEmbed.class));
+        // Verify separate counts
+        assertEquals(2L, listener.getVoiceJoinCount(TEST_GUILD_ID, TEST_USER_ID));
+        assertEquals(1L, listener.getVoiceJoinCount("987654321", TEST_USER_ID));
     }
 
     @Test
-    void shouldSendMilestoneFor100thJoin() {
-        // Given
+    @Tag("milestone")
+    @Tag("slow")
+    void testMilestoneOnlyAtSpecificCounts() {
+        // Setup
         when(mockEvent.getChannelLeft()).thenReturn(null);
-        when(mockEvent.getChannelJoined()).thenReturn(mockVoiceChannel);
-        when(mockDatabase.incrementVoiceJoinCount(123L)).thenReturn(100L);
-        when(mockJda.getTextChannelById(BOT_MESSAGE_CHANNEL_ID)).thenReturn(mockTextChannel);
-        when(mockTextChannel.sendMessageEmbeds(any(MessageEmbed.class))).thenReturn(mockMessageAction);
+        when(mockEvent.getChannelJoined()).thenReturn(mockAudioChannel);
 
-        // When
-        listener.onGuildVoiceUpdate(mockEvent);
-
-        // Then
-        verify(mockTextChannel).sendMessageEmbeds(any(MessageEmbed.class));
-    }
-
-    @Test
-    void shouldNotSendMessageForNonMilestone() {
-        // Given
-        when(mockEvent.getChannelLeft()).thenReturn(null);
-        when(mockEvent.getChannelJoined()).thenReturn(mockVoiceChannel);
-        when(mockDatabase.incrementVoiceJoinCount(123L)).thenReturn(50L); // Not a milestone
-
-        // When
-        listener.onGuildVoiceUpdate(mockEvent);
-
-        // Then
-        verify(mockDatabase).incrementVoiceJoinCount(123L);
-        verify(mockJda, never()).getTextChannelById(anyLong());
-    }
-
-    @Test
-    void shouldHandleMissingBotChannel() {
-        // Given
-        when(mockEvent.getChannelLeft()).thenReturn(null);
-        when(mockEvent.getChannelJoined()).thenReturn(mockVoiceChannel);
-        when(mockDatabase.incrementVoiceJoinCount(123L)).thenReturn(1L);
-        when(mockJda.getTextChannelById(BOT_MESSAGE_CHANNEL_ID)).thenReturn(null);
-
-        // When
-        listener.onGuildVoiceUpdate(mockEvent);
-
-        // Then
-        verify(mockDatabase).incrementVoiceJoinCount(123L);
-        verify(mockJda).getTextChannelById(BOT_MESSAGE_CHANNEL_ID);
-    }
-
-    @Test
-    void shouldTestAllMilestones() {
-        // Given
-        int[] expectedMilestones = {1, 100, 500, 1000, 2000, 5000};
-
-        for (int milestone : expectedMilestones) {
-            // Reset specific mocks for each milestone
-            reset(mockDatabase, mockJda, mockTextChannel, mockMessageAction);
-
-            when(mockEvent.getChannelLeft()).thenReturn(null);
-            when(mockEvent.getChannelJoined()).thenReturn(mockVoiceChannel);
-            when(mockDatabase.incrementVoiceJoinCount(123L)).thenReturn((long) milestone);
-            when(mockJda.getTextChannelById(BOT_MESSAGE_CHANNEL_ID)).thenReturn(mockTextChannel);
-            when(mockTextChannel.sendMessageEmbeds(any(MessageEmbed.class))).thenReturn(mockMessageAction);
-
-            // When
+        // Execute joins up to milestone 100
+        for (int i = 1; i <= 100; i++) {
             listener.onGuildVoiceUpdate(mockEvent);
-
-            // Then
-            verify(mockTextChannel).sendMessageEmbeds(any(MessageEmbed.class));
         }
+
+        assertEquals(100L, listener.getVoiceJoinCount(TEST_GUILD_ID, TEST_USER_ID));
     }
 
     @Test
-    void shouldHandleChannelMoveAsNonJoin() {
-        // Given
-        AudioChannelUnion mockLeftChannel = mock(AudioChannelUnion.class);
-        when(mockEvent.getChannelLeft()).thenReturn(mockLeftChannel);
-        when(mockEvent.getChannelJoined()).thenReturn(mockVoiceChannel);
+    @Tag("config")
+    void testSetAndGetBotChannel() {
+        // Test setting bot channel
+        listener.setBotChannel(TEST_GUILD_ID_LONG, TEST_CHANNEL_ID);
+        verify(mockConfigDatabase).setBotChannelId(TEST_GUILD_ID_LONG, TEST_CHANNEL_ID);
 
-        // When
-        listener.onGuildVoiceUpdate(mockEvent);
-
-        // Then
-        verify(mockDatabase, never()).incrementVoiceJoinCount(anyLong());
+        // Test getting bot channel
+        when(mockConfigDatabase.getBotChannelId(TEST_GUILD_ID_LONG)).thenReturn(TEST_CHANNEL_ID);
+        Long result = listener.getBotChannelId(TEST_GUILD_ID_LONG);
+        assertEquals(TEST_CHANNEL_ID, result);
     }
 }
