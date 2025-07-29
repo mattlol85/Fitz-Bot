@@ -17,6 +17,8 @@ jobs:
 
     outputs:
       should-tag: ${{ steps.check-branch.outputs.should-tag }}
+      jar-path: ${{ steps.build.outputs.jar-path }}
+      jar-name: ${{ steps.build.outputs.jar-name }}
 
     steps:
     - name: 📥 Checkout code
@@ -42,11 +44,29 @@ jobs:
         ./gradlew test --console=plain
         echo "::endgroup::"
 
-    - name: 🏗️ Build application
+    - name: 🏗️ Build application and create JAR
+      id: build
       run: |
         echo "::group::Building application"
-        ./gradlew build --console=plain
+        ./gradlew build bootJar --console=plain
+        
+        # Find the generated JAR file
+        JAR_FILE=$(find build/libs -name "*.jar" -not -name "*-plain.jar" | head -1)
+        JAR_NAME=$(basename "$JAR_FILE")
+        
+        echo "jar-path=$JAR_FILE" >> $GITHUB_OUTPUT
+        echo "jar-name=$JAR_NAME" >> $GITHUB_OUTPUT
+        
+        echo "✅ Built JAR: $JAR_NAME"
+        echo "📦 JAR location: $JAR_FILE"
         echo "::endgroup::"
+
+    - name: 📤 Upload JAR artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: application-jar
+        path: ${{ steps.build.outputs.jar-path }}
+        retention-days: 30
 
     - name: ✅ Build completed successfully
       run: echo "✅ Build and tests passed successfully!"
@@ -54,6 +74,13 @@ jobs:
     - name: 🎯 Check if we should create tag
       id: check-branch
       run: |
+        # Check if this is a bot commit to prevent infinite loops
+        if [[ "${{ github.actor }}" == "github-actions[bot]" ]]; then
+          echo "should-tag=false" >> $GITHUB_OUTPUT
+          echo "⏭️ Skipping tag creation (bot commit detected)"
+          exit 0
+        fi
+        
         if [[ "${{ github.ref }}" == "refs/heads/main" || "${{ github.ref }}" == "refs/heads/master" ]] && [[ "${{ github.event_name }}" == "push" ]]; then
           echo "should-tag=true" >> $GITHUB_OUTPUT
           echo "🏷️ Will create tag after successful build"
@@ -75,21 +102,14 @@ jobs:
         fetch-depth: 0
         token: ${{ secrets.GITHUB_TOKEN }}
 
-    - name: 🔍 Get latest tag
-      id: get-latest-tag
-      run: |
-        echo "::group::Finding latest tag"
-        # Get the latest tag, or default to v0.0.0 if no tags exist
-        LATEST_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "v0.0.0")
-        echo "latest-tag=$LATEST_TAG" >> $GITHUB_OUTPUT
-        echo "📌 Latest tag: $LATEST_TAG"
-        echo "::endgroup::"
-
-    - name: 🧮 Calculate new version
-      id: calc-version
+    - name: 🔍 Get latest tag and calculate new version
+      id: version
       run: |
         echo "::group::Calculating new version"
-        LATEST_TAG="${{ steps.get-latest-tag.outputs.latest-tag }}"
+        
+        # Get the latest tag, or use v0.5.0 as base since next should be v0.6.0
+        LATEST_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "v0.5.0")
+        echo "📌 Latest tag: $LATEST_TAG"
         
         # Remove 'v' prefix if present
         VERSION=${LATEST_TAG#v}
@@ -97,7 +117,7 @@ jobs:
         # Split version into parts
         IFS='.' read -ra VERSION_PARTS <<< "$VERSION"
         MAJOR=${VERSION_PARTS[0]:-0}
-        MINOR=${VERSION_PARTS[1]:-0}
+        MINOR=${VERSION_PARTS[1]:-5}
         PATCH=${VERSION_PARTS[2]:-0}
         
         # Check commit message for version increment type
@@ -132,20 +152,84 @@ jobs:
         fi
         
         NEW_VERSION="v$NEW_MAJOR.$NEW_MINOR.$NEW_PATCH"
+        NEW_VERSION_NO_V="$NEW_MAJOR.$NEW_MINOR.$NEW_PATCH"
         
         echo "new-version=$NEW_VERSION" >> $GITHUB_OUTPUT
+        echo "new-version-no-v=$NEW_VERSION_NO_V" >> $GITHUB_OUTPUT
         echo "increment-type=$INCREMENT_TYPE" >> $GITHUB_OUTPUT
         echo "emoji=$EMOJI" >> $GITHUB_OUTPUT
         echo "$EMOJI Incrementing $INCREMENT_TYPE version: $LATEST_TAG → $NEW_VERSION"
+        echo "::endgroup::"
+
+    - name: 📝 Update build.gradle version
+      run: |
+        echo "::group::Updating build.gradle version"
+        NEW_VERSION="${{ steps.version.outputs.new-version-no-v }}"
+        
+        # Update the version in build.gradle
+        sed -i "s/version = '.*'/version = '$NEW_VERSION'/" build.gradle
+        
+        echo "✅ Updated build.gradle version to: $NEW_VERSION"
+        
+        # Show the change
+        echo "📄 Updated build.gradle:"
+        grep "version = " build.gradle
+        echo "::endgroup::"
+
+    - name: 📥 Download original JAR
+      uses: actions/download-artifact@v4
+      with:
+        name: application-jar
+        path: ./downloaded-jar
+
+    - name: 🔄 Rename JAR with new version
+      id: final-jar
+      run: |
+        echo "::group::Preparing final JAR"
+        NEW_VERSION="${{ steps.version.outputs.new-version-no-v }}"
+        
+        # Find the downloaded JAR
+        ORIGINAL_JAR=$(find ./downloaded-jar -name "*.jar" | head -1)
+        ORIGINAL_NAME=$(basename "$ORIGINAL_JAR")
+        
+        # Create new JAR name with correct version
+        NEW_JAR_NAME="${ORIGINAL_NAME/0.1.0-SNAPSHOT/$NEW_VERSION}"
+        NEW_JAR_PATH="./downloaded-jar/$NEW_JAR_NAME"
+        
+        # Rename the JAR file
+        mv "$ORIGINAL_JAR" "$NEW_JAR_PATH"
+        
+        echo "jar-path=$NEW_JAR_PATH" >> $GITHUB_OUTPUT
+        echo "jar-name=$NEW_JAR_NAME" >> $GITHUB_OUTPUT
+        
+        echo "✅ Renamed JAR: $ORIGINAL_NAME → $NEW_JAR_NAME"
+        echo "📦 Final JAR location: $NEW_JAR_PATH"
+        echo "::endgroup::"
+
+    - name: 📝 Commit version update
+      run: |
+        echo "::group::Committing version update"
+        NEW_VERSION="${{ steps.version.outputs.new-version }}"
+        
+        # Configure git
+        git config user.name "github-actions[bot]"
+        git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+        
+        # Add and commit the version change
+        git add build.gradle
+        git commit -m "chore: bump version to $NEW_VERSION [skip ci]"
+        git push origin ${{ github.ref_name }}
+        
+        echo "✅ Committed version update"
         echo "::endgroup::"
 
     - name: 🏷️ Create and push tag
       id: create-tag
       run: |
         echo "::group::Creating Git tag"
-        NEW_VERSION="${{ steps.calc-version.outputs.new-version }}"
-        INCREMENT_TYPE="${{ steps.calc-version.outputs.increment-type }}"
-        EMOJI="${{ steps.calc-version.outputs.emoji }}"
+        NEW_VERSION="${{ steps.version.outputs.new-version }}"
+        INCREMENT_TYPE="${{ steps.version.outputs.increment-type }}"
+        EMOJI="${{ steps.version.outputs.emoji }}"
         
         # Configure git
         git config user.name "github-actions[bot]"
@@ -165,14 +249,16 @@ jobs:
         echo "tag-created=$NEW_VERSION" >> $GITHUB_OUTPUT
         echo "::endgroup::"
 
-    - name: 📦 Create GitHub Release
+    - name: 📦 Create GitHub Release with JAR
       env:
         GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       run: |
         echo "::group::Creating GitHub Release"
-        NEW_VERSION="${{ steps.calc-version.outputs.new-version }}"
-        INCREMENT_TYPE="${{ steps.calc-version.outputs.increment-type }}"
-        EMOJI="${{ steps.calc-version.outputs.emoji }}"
+        NEW_VERSION="${{ steps.version.outputs.new-version }}"
+        INCREMENT_TYPE="${{ steps.version.outputs.increment-type }}"
+        EMOJI="${{ steps.version.outputs.emoji }}"
+        JAR_PATH="${{ steps.final-jar.outputs.jar-path }}"
+        JAR_NAME="${{ steps.final-jar.outputs.jar-name }}"
         
         gh release create "$NEW_VERSION" \
           --title "$EMOJI Release $NEW_VERSION" \
@@ -184,11 +270,22 @@ jobs:
         **📝 Commit:** \`${{ github.sha }}\`  
         **👤 Triggered by:** ${{ github.actor }}
         
+        ### 📦 Downloads
+        - **JAR File:** \`$JAR_NAME\`
+        
         ### 💬 Commit Message
         \`\`\`
         ${{ github.event.head_commit.message }}
-        \`\`\`"
+        \`\`\`
+        
+        ### 🚀 Installation
+        Download the JAR file and run with:
+        \`\`\`bash
+        java -jar $JAR_NAME
+        \`\`\`" \
+          "$JAR_PATH"
         
         echo "✅ GitHub Release created successfully!"
         echo "🔗 View release: https://github.com/${{ github.repository }}/releases/tag/$NEW_VERSION"
+        echo "📦 JAR attached: $JAR_NAME"
         echo "::endgroup::"
