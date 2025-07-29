@@ -81,6 +81,27 @@ jobs:
           exit 0
         fi
         
+        # Check if only workflow files were changed
+        if [[ "${{ github.event_name }}" == "push" ]]; then
+          echo "::group::Checking changed files"
+          
+          # Get list of changed files
+          CHANGED_FILES=$(git diff --name-only ${{ github.event.before }} ${{ github.sha }} || echo "")
+          echo "Changed files: $CHANGED_FILES"
+          
+          # Check if only workflow files were changed
+          NON_WORKFLOW_CHANGES=$(echo "$CHANGED_FILES" | grep -v "^\.github/workflows/" | grep -v "^$" || true)
+          
+          if [[ -z "$NON_WORKFLOW_CHANGES" && -n "$CHANGED_FILES" ]]; then
+            echo "should-tag=false" >> $GITHUB_OUTPUT
+            echo "⏭️ Skipping tag creation (only workflow files changed)"
+            echo "::endgroup::"
+            exit 0
+          fi
+          
+          echo "::endgroup::"
+        fi
+        
         if [[ "${{ github.ref }}" == "refs/heads/main" || "${{ github.ref }}" == "refs/heads/master" ]] && [[ "${{ github.event_name }}" == "push" ]]; then
           echo "should-tag=true" >> $GITHUB_OUTPUT
           echo "🏷️ Will create tag after successful build"
