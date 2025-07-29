@@ -151,7 +151,7 @@ jobs:
         "
         
         # Copy JAR to Pi
-        scp -i ~/.ssh/pi_key $JAR_FILE ${{ secrets.PI_USER }}@${{ secrets.PI_HOST }}:~/fitz-bot/deployments/
+        scp -F ~/.ssh/config -i ~/.ssh/pi_key $JAR_FILE pi:~/fitz-bot/deployments/
         
         # Create symlink to current version
         ssh pi "
