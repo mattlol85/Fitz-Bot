@@ -1,0 +1,299 @@
+name: 🚀 Deploy to Raspberry Pi
+
+on:
+  # Trigger on successful release creation
+  release:
+    types: [published]
+
+  # Manual trigger option
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version to deploy (e.g., v0.6.0)'
+        required: true
+        default: 'latest'
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    name: 🚀 Deploy to Raspberry Pi
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: 📥 Checkout code
+      uses: actions/checkout@v4
+
+    - name: 🔍 Get deployment version
+      id: version
+      run: |
+        if [[ "${{ github.event_name }}" == "release" ]]; then
+          VERSION="${{ github.event.release.tag_name }}"
+          echo "Deploying from release: $VERSION"
+        else
+          VERSION="${{ github.event.inputs.version }}"
+          echo "Deploying manually specified version: $VERSION"
+        fi
+        
+        # Remove 'v' prefix if present
+        VERSION_NO_V=${VERSION#v}
+        
+        echo "version=$VERSION" >> $GITHUB_OUTPUT
+        echo "version-no-v=$VERSION_NO_V" >> $GITHUB_OUTPUT
+        echo "📦 Target version: $VERSION"
+
+    - name: 📥 Download JAR from release
+      env:
+        GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      run: |
+        echo "::group::Downloading JAR from release"
+        VERSION="${{ steps.version.outputs.version }}"
+        
+        # Download the JAR from the GitHub release
+        gh release download "$VERSION" --pattern "*.jar" --dir ./deployment
+        
+        # Find the downloaded JAR
+        JAR_FILE=$(find ./deployment -name "*.jar" | head -1)
+        JAR_NAME=$(basename "$JAR_FILE")
+        
+        echo "✅ Downloaded: $JAR_NAME"
+        echo "📦 Location: $JAR_FILE"
+        
+        # Store for later steps
+        echo "JAR_FILE=$JAR_FILE" >> $GITHUB_ENV
+        echo "JAR_NAME=$JAR_NAME" >> $GITHUB_ENV
+        echo "::endgroup::"
+
+    - name: 🔑 Setup SSH key
+      run: |
+        echo "::group::Setting up SSH key"
+        mkdir -p ~/.ssh
+        chmod 700 ~/.ssh
+        
+        # Write the private key to a file with restricted permissions
+        echo "${{ secrets.PI_SSH_PRIVATE_KEY }}" > ~/.ssh/pi_key
+        chmod 600 ~/.ssh/pi_key
+        
+        # Verify key format
+        if ! ssh-keygen -y -f ~/.ssh/pi_key >/dev/null 2>&1; then
+          echo "❌ Invalid SSH private key format"
+          exit 1
+        fi
+        
+        # Create SSH config for easier connection
+        cat > ~/.ssh/config << EOF
+        Host pi
+            HostName ${{ secrets.PI_HOST }}
+            User ${{ secrets.PI_USER }}
+            IdentityFile ~/.ssh/pi_key
+            Port 22
+            StrictHostKeyChecking no
+            UserKnownHostsFile /dev/null
+            ConnectTimeout 30
+            ServerAliveInterval 60
+            ServerAliveCountMax 3
+        EOF
+        chmod 600 ~/.ssh/config
+        
+        echo "✅ SSH key configured and verified"
+        echo "::endgroup::"
+
+    - name: 🏥 Health check - Test SSH connection
+      run: |
+        echo "::group::Testing SSH connection"
+        ssh pi "echo 'SSH connection successful! 🎉'"
+        echo "✅ SSH connection verified"
+        echo "::endgroup::"
+
+    - name: 🛑 Stop existing application
+      run: |
+        echo "::group::Stopping existing application"
+        ssh pi "
+          echo 'Stopping Fitz-Bot service...'
+          
+          # Stop systemd service if it exists
+          if systemctl is-active --quiet fitz-bot 2>/dev/null; then
+            sudo systemctl stop fitz-bot
+            echo '✅ Stopped fitz-bot service'
+          else
+            echo 'ℹ️  fitz-bot service not running'
+          fi
+          
+          # Kill any running Java processes for the bot (backup method)
+          if pgrep -f 'fitz.*jar' > /dev/null; then
+            echo 'Killing existing bot processes...'
+            pkill -f 'fitz.*jar' || true
+            sleep 2
+            echo '✅ Stopped existing processes'
+          else
+            echo 'ℹ️  No existing bot processes found'
+          fi
+        "
+        echo "✅ Application stop completed"
+        echo "::endgroup::"
+
+    - name: 📤 Deploy JAR to Raspberry Pi
+      run: |
+        echo "::group::Deploying JAR file"
+        VERSION="${{ steps.version.outputs.version }}"
+        
+        # Create deployment directory on Pi
+        ssh pi "
+          mkdir -p ~/fitz-bot/deployments
+          mkdir -p ~/fitz-bot/logs
+          mkdir -p ~/fitz-bot/config
+        "
+        
+        # Copy JAR to Pi
+        scp -i ~/.ssh/pi_key $JAR_FILE ${{ secrets.PI_USER }}@${{ secrets.PI_HOST }}:~/fitz-bot/deployments/
+        
+        # Create symlink to current version
+        ssh pi "
+          cd ~/fitz-bot
+          ln -sf deployments/$JAR_NAME current.jar
+          echo '✅ Created symlink: current.jar -> deployments/$JAR_NAME'
+          
+          # Set executable permissions
+          chmod +x deployments/$JAR_NAME
+          chmod +x current.jar
+        "
+        
+        echo "✅ JAR deployed successfully"
+        echo "📦 Deployed: $JAR_NAME"
+        echo "🔗 Symlink: ~/fitz-bot/current.jar"
+        echo "::endgroup::"
+
+    - name: ⚙️ Update configuration
+      run: |
+        echo "::group::Updating configuration"
+        ssh pi '
+          cd ~/fitz-bot
+          
+          # Create application.properties if it does not exist
+          if [ ! -f config/application.properties ]; then
+            echo "Creating default application.properties..."
+            echo "# Fitz-Bot Configuration" > config/application.properties
+            echo "server.port=8080" >> config/application.properties
+            echo "logging.level.org.fitznet=INFO" >> config/application.properties
+            echo "logging.file.name=logs/fitz-bot.log" >> config/application.properties
+            echo "✅ Created default configuration"
+          else
+            echo "ℹ️  Configuration file already exists"
+          fi
+          
+          # Set version info
+          echo "deployment.version=${{ steps.version.outputs.version }}" > config/deployment.info
+          echo "deployment.date=$(date -Iseconds)" >> config/deployment.info
+          echo "deployment.build=${{ github.run_number }}" >> config/deployment.info
+        '
+        echo "✅ Configuration updated"
+        echo "::endgroup::"
+
+    - name: 🚀 Start application
+      run: |
+        echo "::group::Starting application"
+        ssh pi "
+          cd ~/fitz-bot
+          
+          # Start the application in the background with Discord token from environment
+          echo 'Starting Fitz-Bot...'
+          DISCORD_BOT_TOKEN='${{ secrets.DISCORD_BOT_TOKEN }}' nohup java -jar current.jar \
+            --spring.config.location=config/application.properties \
+            > logs/fitz-bot.log 2>&1 &
+          
+          echo 'Application started with PID: '\$!
+          
+          # Wait a moment for startup
+          sleep 5
+          
+          # Check if application is running
+          if pgrep -f 'current.jar' > /dev/null; then
+            echo '✅ Fitz-Bot is running successfully!'
+            echo 'PID: '$(pgrep -f 'current.jar')
+          else
+            echo '❌ Failed to start Fitz-Bot'
+            echo 'Last 10 lines of log:'
+            tail -10 logs/fitz-bot.log || echo 'No log file found'
+            exit 1
+          fi
+        "
+        echo "✅ Application started successfully"
+        echo "::endgroup::"
+
+    - name: 🏥 Health check - Verify deployment
+      run: |
+        echo "::group::Verifying deployment"
+        
+        # Wait for application to fully start
+        echo "Waiting for application to start..."
+        sleep 15
+        
+        ssh pi "
+          cd ~/fitz-bot
+          
+          echo '=== Process Status ==='
+          if pgrep -f 'current.jar' > /dev/null; then
+            echo '✅ Process is running (PID: '$(pgrep -f 'current.jar')')'
+          else
+            echo '❌ Process is not running'
+            exit 1
+          fi
+          
+          echo ''
+          echo '=== Log Check ==='
+          if [ -f logs/fitz-bot.log ]; then
+            echo 'Last 5 lines of log:'
+            tail -5 logs/fitz-bot.log
+          else
+            echo '⚠️  No log file found'
+          fi
+          
+          echo ''
+          echo '=== Port Check ==='
+          if netstat -tuln | grep ':8080' > /dev/null; then
+            echo '✅ Application is listening on port 8080'
+          else
+            echo 'ℹ️  Port 8080 not detected (may be normal if no web server)'
+          fi
+        "
+        
+        echo "✅ Deployment verification completed"
+        echo "🎉 Fitz-Bot deployed successfully to Raspberry Pi!"
+        echo "::endgroup::"
+
+    - name: 📋 Deployment summary
+      run: |
+        echo "## 🎉 Deployment Summary"
+        echo "**Version:** ${{ steps.version.outputs.version }}"
+        echo "**Target:** ${{ secrets.PI_HOST }}"
+        echo "**JAR:** $JAR_NAME"
+        echo "**Deployment Time:** $(date -u '+%Y-%m-%d %H:%M:%S UTC')"
+        echo "**Build:** #${{ github.run_number }}"
+        echo ""
+        echo "### 📁 Deployment Structure"
+        echo "- **Application:** ~/fitz-bot/current.jar"
+        echo "- **Config:** ~/fitz-bot/config/"
+        echo "- **Logs:** ~/fitz-bot/logs/"
+        echo "- **Deployments:** ~/fitz-bot/deployments/"
+        echo ""
+        echo "### 🔗 Quick Commands"
+        echo "\`\`\`bash"
+        echo "# Check status"
+        echo "ssh ${{ secrets.PI_USER }}@${{ secrets.PI_HOST }} 'pgrep -f current.jar'"
+        echo ""
+        echo "# View logs"
+        echo "ssh ${{ secrets.PI_USER }}@${{ secrets.PI_HOST }} 'tail -f ~/fitz-bot/logs/fitz-bot.log'"
+        echo ""
+        echo "# Restart application"
+        echo "ssh ${{ secrets.PI_USER }}@${{ secrets.PI_HOST }} 'pkill -f current.jar && cd ~/fitz-bot && nohup java -jar current.jar > logs/fitz-bot.log 2>&1 &'"
+        echo "\`\`\`"
+
+    - name: 🧹 Cleanup SSH key
+      if: always()
+      run: |
+        echo "::group::Cleaning up SSH key"
+        rm -f ~/.ssh/pi_key
+        rm -f ~/.ssh/config
+        echo "✅ SSH key cleaned up"
+        echo "::endgroup::"
