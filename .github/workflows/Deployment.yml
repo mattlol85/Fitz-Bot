@@ -121,15 +121,20 @@ jobs:
           fi
           
           # Kill any running Java processes for the bot (backup method)
-          if pgrep -f 'fitz.*jar' > /dev/null; then
+          if pgrep -f 'fitz.*jar' > /dev/null 2>&1; then
             echo 'Killing existing bot processes...'
-            pkill -f 'fitz.*jar' || true
+            pkill -f 'fitz.*jar' 2>/dev/null || true
             sleep 2
             echo '✅ Stopped existing processes'
           else
             echo 'ℹ️  No existing bot processes found'
           fi
-        "
+          
+          # Ensure we always exit successfully from this step
+          echo 'Stop process completed successfully'
+        " || {
+          echo 'ℹ️  SSH command completed with warnings (this is normal on first deployment)'
+        }
         echo "✅ Application stop completed"
         echo "::endgroup::"
 
