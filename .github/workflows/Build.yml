@@ -135,7 +135,7 @@ jobs:
         # Remove 'v' prefix if present
         VERSION=${LATEST_TAG#v}
         
-        # Split version into parts
+        # Split version into parts using proper bash array handling
         IFS='.' read -ra VERSION_PARTS <<< "$VERSION"
         MAJOR=${VERSION_PARTS[0]:-0}
         MINOR=${VERSION_PARTS[1]:-5}
@@ -145,19 +145,20 @@ jobs:
         COMMIT_MSG="${{ github.event.head_commit.message }}"
         echo "📝 Commit message: $COMMIT_MSG"
         
-        if [[ $COMMIT_MSG =~ ^major|major\( ]]; then
+        # Use proper bash regex matching with [[ =~ ]]
+        if [[ "$COMMIT_MSG" =~ ^major ]] || [[ "$COMMIT_MSG" =~ major\( ]]; then
           NEW_MAJOR=$((MAJOR + 1))
           NEW_MINOR=0
           NEW_PATCH=0
           INCREMENT_TYPE="major"
           EMOJI="🚀"
-        elif [[ $COMMIT_MSG =~ ^fix\(|^fix: ]]; then
+        elif [[ "$COMMIT_MSG" =~ ^fix\( ]] || [[ "$COMMIT_MSG" =~ ^fix: ]]; then
           NEW_MAJOR=$MAJOR
           NEW_MINOR=$MINOR
           NEW_PATCH=$((PATCH + 1))
           INCREMENT_TYPE="patch"
           EMOJI="🐛"
-        elif [[ $COMMIT_MSG =~ ^chore\( ]]; then
+        elif [[ "$COMMIT_MSG" =~ ^chore\( ]]; then
           NEW_MAJOR=$MAJOR
           NEW_MINOR=$MINOR
           NEW_PATCH=$((PATCH + 1))
