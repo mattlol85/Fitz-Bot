@@ -214,16 +214,24 @@ jobs:
         ORIGINAL_NAME=$(basename "$ORIGINAL_JAR")
         
         # Create new JAR name with correct version
-        NEW_JAR_NAME="${ORIGINAL_NAME/0.1.0-SNAPSHOT/$NEW_VERSION}"
+        # Extract base name without version and add new version
+        BASE_NAME=$(echo "$ORIGINAL_NAME" | sed 's/-[0-9]\+\.[0-9]\+\.[0-9]\+.*\.jar$//')
+        NEW_JAR_NAME="${BASE_NAME}-${NEW_VERSION}.jar"
         NEW_JAR_PATH="./downloaded-jar/$NEW_JAR_NAME"
         
-        # Rename the JAR file
-        mv "$ORIGINAL_JAR" "$NEW_JAR_PATH"
+        # Only rename if the names are different
+        if [[ "$ORIGINAL_NAME" != "$NEW_JAR_NAME" ]]; then
+          echo "📝 Renaming JAR: $ORIGINAL_NAME → $NEW_JAR_NAME"
+          mv "$ORIGINAL_JAR" "$NEW_JAR_PATH"
+          echo "✅ JAR renamed successfully"
+        else
+          echo "ℹ️  JAR already has correct name: $ORIGINAL_NAME"
+          NEW_JAR_PATH="$ORIGINAL_JAR"
+        fi
         
         echo "jar-path=$NEW_JAR_PATH" >> $GITHUB_OUTPUT
         echo "jar-name=$NEW_JAR_NAME" >> $GITHUB_OUTPUT
         
-        echo "✅ Renamed JAR: $ORIGINAL_NAME → $NEW_JAR_NAME"
         echo "📦 Final JAR location: $NEW_JAR_PATH"
         echo "::endgroup::"
 
