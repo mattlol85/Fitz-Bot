@@ -17,7 +17,11 @@ POST http://localhost:8080/bot/force-update-commands
 # Replace YOUR_GUILD_ID with your Discord server ID
 POST http://localhost:8080/bot/register-guild-commands/YOUR_GUILD_ID
 
+### Reset join counts for a specific guild
+# Replace YOUR_GUILD_ID with your Discord server ID
+POST http://localhost:8080/bot/reset-join-counts/YOUR_GUILD_ID
 
 ### Example with a real guild ID (update this with your server ID)
 # To get your guild ID: Enable Developer Mode in Discord → Right-click your server → Copy Server ID
 # POST http://localhost:8080/bot/register-guild-commands/123456789012345678
+# POST http://localhost:8080/bot/reset-join-counts/123456789012345678

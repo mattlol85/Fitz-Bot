@@ -48,7 +48,7 @@ public class BotService {
                     .build().awaitReady();
 
             // Add event listeners
-            jda.addEventListener(new LoginListener(jda));
+            jda.addEventListener(new LoginListener());
             jda.addEventListener(new ConfigCommands());
 
             // Small delay to ensure guild cache is fully populated
@@ -163,6 +163,64 @@ public class BotService {
             return "Bot is not initialized.";
         }
         return "Bot status: " + jda.getStatus();
+    }
+
+    /**
+     * Resets all join counts for a specific guild.
+     *
+     * @param guildId the Discord guild ID
+     * @return reset result message
+     */
+    public String resetGuildJoinCounts(String guildId) {
+        if (jda == null) {
+            return "Bot is not running!";
+        }
+
+        try {
+            long guildIdLong = Long.parseLong(guildId);
+
+            // Verify guild exists
+            var guild = jda.getGuildById(guildIdLong);
+            if (guild == null) {
+                return "Guild not found with ID: " + guildId;
+            }
+
+            // Get LoginListener from JDA event listeners
+            LoginListener loginListener = getLoginListener();
+            if (loginListener == null) {
+                return "LoginListener not found - bot may not be properly initialized";
+            }
+
+            int resetCount = loginListener.resetAllJoinCounts(guildIdLong);
+            String result = String.format("Reset join counts for %d users in guild '%s' (%s)",
+                                        resetCount, guild.getName(), guildId);
+            log.info(result);
+            return result;
+
+        } catch (NumberFormatException e) {
+            return "Invalid guild ID format: " + guildId;
+        } catch (Exception e) {
+            String error = "Error resetting join counts for guild " + guildId + ": " + e.getMessage();
+            log.error(error, e);
+            return error;
+        }
+    }
+
+    /**
+     * Gets the LoginListener from the JDA event listeners.
+     *
+     * @return LoginListener instance or null if not found
+     */
+    private LoginListener getLoginListener() {
+        if (jda == null) {
+            return null;
+        }
+
+        return jda.getRegisteredListeners().stream()
+                .filter(listener -> listener instanceof LoginListener)
+                .map(listener -> (LoginListener) listener)
+                .findFirst()
+                .orElse(null);
     }
 
 }
