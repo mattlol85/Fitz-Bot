@@ -146,7 +146,7 @@ jobs:
         echo "📝 Commit message: $COMMIT_MSG"
         
         # Use proper bash regex matching with [[ =~ ]]
-        if [[ "$COMMIT_MSG" =~ ^major ]] || [[ "$COMMIT_MSG" =~ major\( ]]; then
+        if [[ "$COMMIT_MSG" =~ ^major\b ]] || [[ "$COMMIT_MSG" =~ major\( ]]; then
           NEW_MAJOR=$((MAJOR + 1))
           NEW_MINOR=0
           NEW_PATCH=0
