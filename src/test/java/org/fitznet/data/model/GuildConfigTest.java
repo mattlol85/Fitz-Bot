@@ -3,6 +3,8 @@ package org.fitznet.data.model;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
+import java.time.LocalDateTime;
+
 import static org.junit.jupiter.api.Assertions.*;
 
 /**
@@ -112,5 +114,55 @@ class GuildConfigTest {
         int[] customMilestones = {1, 2, 3};
         guildConfig.setMilestones(customMilestones);
         assertArrayEquals(customMilestones, guildConfig.getMilestonesOrDefault());
+    }
+
+    @Test
+    void testTrackingStartDateInitialization() {
+        assertNull(guildConfig.getTrackingStartDate(), "Tracking start date should initially be null");
+        assertFalse(guildConfig.isTrackingInitialized(), "Tracking should not be initialized initially");
+
+        guildConfig.initializeTrackingIfNeeded();
+
+        assertNotNull(guildConfig.getTrackingStartDate(), "Tracking start date should be set after initialization");
+        assertTrue(guildConfig.isTrackingInitialized(), "Tracking should be initialized after calling initializeTrackingIfNeeded");
+    }
+
+    @Test
+    void testTrackingStartDateIdempotent() {
+        guildConfig.initializeTrackingIfNeeded();
+        LocalDateTime firstDate = guildConfig.getTrackingStartDate();
+
+        try {
+            Thread.sleep(10);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        }
+
+        guildConfig.initializeTrackingIfNeeded();
+        LocalDateTime secondDate = guildConfig.getTrackingStartDate();
+
+        assertEquals(firstDate, secondDate, "Tracking start date should not change on subsequent calls");
+    }
+
+    @Test
+    void testBuilderWithTrackingDate() {
+        LocalDateTime testDate = LocalDateTime.of(2024, 1, 15, 10, 30);
+
+        GuildConfig config = GuildConfig.builder()
+                .botChannelId(123L)
+                .trackingStartDate(testDate)
+                .build();
+
+        assertEquals(testDate, config.getTrackingStartDate());
+        assertTrue(config.isTrackingInitialized());
+    }
+
+    @Test
+    void testTrackingDatePersistence() {
+        LocalDateTime testDate = LocalDateTime.now().minusDays(5);
+        guildConfig.setTrackingStartDate(testDate);
+
+        assertEquals(testDate, guildConfig.getTrackingStartDate());
+        assertTrue(guildConfig.isTrackingInitialized());
     }
 }
