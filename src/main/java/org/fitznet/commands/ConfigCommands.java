@@ -34,7 +34,8 @@ public class ConfigCommands extends ListenerAdapter {
         return new SlashCommandData[]{
             Commands.slash("setbotchannel", "Set the channel for bot milestone messages")
                 .addOption(OptionType.CHANNEL, "channel", "The text channel to use for bot messages", true),
-            Commands.slash("getbotchannel", "Show the current bot channel configuration")
+            Commands.slash("getbotchannel", "Show the current bot channel configuration"),
+            Commands.slash("resetjoincounts", "Reset all voice join counts for this server (Admin only)")
         };
     }
 
@@ -59,6 +60,7 @@ public class ConfigCommands extends ListenerAdapter {
             switch (event.getName()) {
                 case "setbotchannel" -> handleSetBotChannel(event);
                 case "getbotchannel" -> handleGetBotChannel(event);
+                case "resetjoincounts" -> handleResetJoinCounts(event);
                 default -> {
                     log.warn("Unknown command: {}", event.getName());
                     event.getHook().editOriginal("❌ Unknown command").queue();
@@ -155,6 +157,33 @@ public class ConfigCommands extends ListenerAdapter {
         } catch (Exception e) {
             log.error("Error in handleGetBotChannel", e);
             event.getHook().editOriginal("❌ An error occurred while getting the bot channel: " + e.getMessage()).queue();
+        }
+    }
+
+    private void handleResetJoinCounts(SlashCommandInteractionEvent event) {
+        log.info("Processing resetjoincounts command for guild: {}", event.getGuild().getName());
+
+        try {
+            // Check permissions
+            if (event.getMember() == null || !event.getMember().hasPermission(Permission.ADMINISTRATOR)) {
+                log.warn("User {} lacks ADMINISTRATOR permission", event.getUser().getName());
+                event.getHook().editOriginal("❌ You need the 'Administrator' permission to use this command!").queue();
+                return;
+            }
+
+            long guildId = event.getGuild().getIdLong();
+
+            // Reset join counts in the database
+            int resetCount = configDatabase.resetAllJoinCounts(guildId);
+
+            log.info("Successfully reset join counts for {} users in guild {}", resetCount, guildId);
+
+            // Send success response
+            event.getHook().editOriginal(String.format("✅ Reset join counts for %d users in this server!", resetCount)).queue();
+
+        } catch (Exception e) {
+            log.error("Error in handleResetJoinCounts", e);
+            event.getHook().editOriginal("❌ An error occurred while resetting join counts: " + e.getMessage()).queue();
         }
     }
 }

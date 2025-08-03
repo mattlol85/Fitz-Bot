@@ -21,7 +21,11 @@ public class GuildConfigDatabase {
     private final String configFile;
 
     public GuildConfigDatabase() {
-        this.configFile = "data/guild_configs.json";
+        this("data/guild_configs.json");
+    }
+
+    public GuildConfigDatabase(String configFilePath) {
+        this.configFile = configFilePath;
         createDataDirectory();
         loadConfigs();
     }
@@ -157,5 +161,74 @@ public class GuildConfigDatabase {
         guildConfigs.remove(guildId);
         saveConfigs();
         log.info("Removed configuration for guild {}", guildId);
+    }
+
+    /**
+     * Gets the join count for a specific user in a guild.
+     *
+     * @param guildId the Discord guild ID
+     * @param userId the Discord user ID
+     * @return the join count, or 0 if user not found
+     */
+    public long getUserJoinCount(long guildId, long userId) {
+        GuildConfig config = guildConfigs.get(guildId);
+        return config != null ? config.getUserJoinCount(userId) : 0L;
+    }
+
+    /**
+     * Increments the join count for a specific user in a guild.
+     *
+     * @param guildId the Discord guild ID
+     * @param userId the Discord user ID
+     * @return the new join count after incrementing
+     */
+    public long incrementUserJoinCount(long guildId, long userId) {
+        GuildConfig config = guildConfigs.computeIfAbsent(guildId, k -> new GuildConfig());
+        long newCount = config.incrementUserJoinCount(userId);
+        saveConfigs();
+        return newCount;
+    }
+
+    /**
+     * Resets all join counts for a specific guild.
+     *
+     * @param guildId the Discord guild ID
+     * @return the number of users whose counts were reset
+     */
+    public int resetAllJoinCounts(long guildId) {
+        GuildConfig config = guildConfigs.get(guildId);
+        if (config == null) {
+            log.info("No configuration found for guild {}, nothing to reset", guildId);
+            return 0;
+        }
+
+        int userCount = config.getUserJoinCounts().size();
+        config.resetAllJoinCounts();
+        saveConfigs();
+        log.info("Reset join counts for {} users in guild {}", userCount, guildId);
+        return userCount;
+    }
+
+    /**
+     * Resets the join count for a specific user in a guild.
+     *
+     * @param guildId the Discord guild ID
+     * @param userId the Discord user ID
+     * @return true if the user had a count to reset, false otherwise
+     */
+    public boolean resetUserJoinCount(long guildId, long userId) {
+        GuildConfig config = guildConfigs.get(guildId);
+        if (config == null) {
+            log.info("No configuration found for guild {}, user {} has no count to reset", guildId, userId);
+            return false;
+        }
+
+        boolean hadCount = config.getUserJoinCounts().containsKey(userId);
+        config.resetUserJoinCount(userId);
+        if (hadCount) {
+            saveConfigs();
+            log.info("Reset join count for user {} in guild {}", userId, guildId);
+        }
+        return hadCount;
     }
 }

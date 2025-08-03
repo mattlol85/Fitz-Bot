@@ -45,4 +45,9 @@ public class BotController {
     public String getStatus() {
         return botService.getStatus();
     }
+
+    @PostMapping("/reset-join-counts/{guildId}")
+    public String resetJoinCounts(@PathVariable String guildId) {
+        return botService.resetGuildJoinCounts(guildId);
+    }
 }

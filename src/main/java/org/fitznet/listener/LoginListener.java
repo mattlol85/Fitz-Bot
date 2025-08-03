@@ -1,7 +1,6 @@
 package org.fitznet.listener;
 
 import lombok.extern.slf4j.Slf4j;
-import net.dv8tion.jda.api.JDA;
 import net.dv8tion.jda.api.entities.Guild;
 import net.dv8tion.jda.api.entities.Member;
 import net.dv8tion.jda.api.entities.MessageEmbed;
@@ -13,27 +12,19 @@ import org.fitznet.util.Constants;
 import org.fitznet.util.EmbedUtil;
 import org.jetbrains.annotations.NotNull;
 
-import java.util.Map;
-import java.util.concurrent.ConcurrentHashMap;
-
 /**
  * Discord event listener that tracks voice channel joins.
- * Maintains voice join counts in memory and sends milestone congratulations.
+ * Maintains voice join counts in persistent storage and sends milestone congratulations.
  */
 @Slf4j
 public class LoginListener extends ListenerAdapter {
-    private final Map<String, Map<Long, Long>> guildUserCounts = new ConcurrentHashMap<>();
     private final int[] loginMilestones = Constants.DEFAULT_MILESTONES;
     private final GuildConfigDatabase configDatabase;
-    private final JDA jda;
 
     /**
-     * Constructs a new LoginListener with the specified JDA instance.
-     *
-     * @param jda the JDA instance used for Discord API interactions
+     * Constructs a new LoginListener.
      */
-    public LoginListener(JDA jda) {
-        this.jda = jda;
+    public LoginListener() {
         this.configDatabase = new GuildConfigDatabase();
     }
 
@@ -68,26 +59,12 @@ public class LoginListener extends ListenerAdapter {
     private void handleVoiceChannelJoin(GuildVoiceUpdateEvent event) {
         Member user = event.getMember();
         Guild guild = event.getGuild();
-        String guildId = guild.getId();
+        long guildId = guild.getIdLong();
         long userId = user.getIdLong();
 
-        long newCount = incrementVoiceJoinCount(guildId, userId);
+        long newCount = configDatabase.incrementUserJoinCount(guildId, userId);
         logVoiceJoin(user, guild.getName(), newCount);
         checkForMilestone(guild, user, newCount);
-    }
-
-    /**
-     * Increments voice join count for a user in a specific guild.
-     *
-     * @param guildId the Discord guild ID
-     * @param userId the Discord user ID
-     * @return new join count after incrementing
-     */
-    private long incrementVoiceJoinCount(String guildId, long userId) {
-        guildUserCounts.computeIfAbsent(guildId, k -> new ConcurrentHashMap<>());
-
-        return guildUserCounts.get(guildId).compute(userId, (key, oldCount) ->
-                oldCount == null ? 1L : oldCount + 1L);
     }
 
     /**
@@ -98,9 +75,39 @@ public class LoginListener extends ListenerAdapter {
      * @return current join count, or 0 if user not found
      */
     public long getVoiceJoinCount(String guildId, long userId) {
-        return guildUserCounts
-                .getOrDefault(guildId, new ConcurrentHashMap<>())
-                .getOrDefault(userId, 0L);
+        return configDatabase.getUserJoinCount(Long.parseLong(guildId), userId);
+    }
+
+    /**
+     * Gets the current voice join count for a user in a specific guild.
+     *
+     * @param guildId the Discord guild ID as long
+     * @param userId the Discord user ID
+     * @return current join count, or 0 if user not found
+     */
+    public long getVoiceJoinCount(long guildId, long userId) {
+        return configDatabase.getUserJoinCount(guildId, userId);
+    }
+
+    /**
+     * Resets all join counts for a specific guild.
+     *
+     * @param guildId the Discord guild ID
+     * @return the number of users whose counts were reset
+     */
+    public int resetAllJoinCounts(long guildId) {
+        return configDatabase.resetAllJoinCounts(guildId);
+    }
+
+    /**
+     * Resets the join count for a specific user in a guild.
+     *
+     * @param guildId the Discord guild ID
+     * @param userId the Discord user ID
+     * @return true if the user had a count to reset, false otherwise
+     */
+    public boolean resetUserJoinCount(long guildId, long userId) {
+        return configDatabase.resetUserJoinCount(guildId, userId);
     }
 
     /**

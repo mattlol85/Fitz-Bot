@@ -25,6 +25,7 @@ import java.lang.reflect.Field;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.Mockito.*;
 
 @ExtendWith(MockitoExtension.class)
@@ -52,7 +53,7 @@ class LoginListenerTest {
 
     @BeforeEach
     void setUp() throws Exception {
-        listener = new LoginListener(mockJda);
+        listener = new LoginListener();
 
         // Replace the configDatabase with mock for testing
         setPrivateField(listener, mockConfigDatabase);
@@ -88,12 +89,43 @@ class LoginListenerTest {
         // Setup
         when(mockEvent.getChannelLeft()).thenReturn(null);
         when(mockEvent.getChannelJoined()).thenReturn(mockAudioChannel);
+        when(mockConfigDatabase.incrementUserJoinCount(TEST_GUILD_ID_LONG, TEST_USER_ID)).thenReturn(1L);
 
         // Execute
         listener.onGuildVoiceUpdate(mockEvent);
 
-        // Verify the count was incremented
-        assertEquals(1L, listener.getVoiceJoinCount(TEST_GUILD_ID, TEST_USER_ID));
+        // Verify the database method was called
+        verify(mockConfigDatabase).incrementUserJoinCount(TEST_GUILD_ID_LONG, TEST_USER_ID);
+    }
+
+    @Test
+    @Tag("voice-counting")
+    void testGetVoiceJoinCount() {
+        when(mockConfigDatabase.getUserJoinCount(TEST_GUILD_ID_LONG, TEST_USER_ID)).thenReturn(5L);
+
+        long count = listener.getVoiceJoinCount(TEST_GUILD_ID, TEST_USER_ID);
+        assertEquals(5L, count);
+        verify(mockConfigDatabase).getUserJoinCount(TEST_GUILD_ID_LONG, TEST_USER_ID);
+    }
+
+    @Test
+    @Tag("reset-functionality")
+    void testResetAllJoinCounts() {
+        when(mockConfigDatabase.resetAllJoinCounts(TEST_GUILD_ID_LONG)).thenReturn(3);
+
+        int resetCount = listener.resetAllJoinCounts(TEST_GUILD_ID_LONG);
+        assertEquals(3, resetCount);
+        verify(mockConfigDatabase).resetAllJoinCounts(TEST_GUILD_ID_LONG);
+    }
+
+    @Test
+    @Tag("reset-functionality")
+    void testResetUserJoinCount() {
+        when(mockConfigDatabase.resetUserJoinCount(TEST_GUILD_ID_LONG, TEST_USER_ID)).thenReturn(true);
+
+        boolean result = listener.resetUserJoinCount(TEST_GUILD_ID_LONG, TEST_USER_ID);
+        assertTrue(result);
+        verify(mockConfigDatabase).resetUserJoinCount(TEST_GUILD_ID_LONG, TEST_USER_ID);
     }
 
     @Test
@@ -102,14 +134,16 @@ class LoginListenerTest {
         // Setup
         when(mockEvent.getChannelLeft()).thenReturn(null);
         when(mockEvent.getChannelJoined()).thenReturn(mockAudioChannel);
+        when(mockConfigDatabase.incrementUserJoinCount(TEST_GUILD_ID_LONG, TEST_USER_ID))
+                .thenReturn(1L, 2L, 3L);
 
         // Execute multiple joins
         listener.onGuildVoiceUpdate(mockEvent);
         listener.onGuildVoiceUpdate(mockEvent);
         listener.onGuildVoiceUpdate(mockEvent);
 
-        // Verify the count
-        assertEquals(3L, listener.getVoiceJoinCount(TEST_GUILD_ID, TEST_USER_ID));
+        // Verify database was called 3 times
+        verify(mockConfigDatabase, times(3)).incrementUserJoinCount(TEST_GUILD_ID_LONG, TEST_USER_ID);
     }
 
     @Test
@@ -119,6 +153,7 @@ class LoginListenerTest {
         // Setup for milestone 1
         when(mockEvent.getChannelLeft()).thenReturn(null);
         when(mockEvent.getChannelJoined()).thenReturn(mockAudioChannel);
+        when(mockConfigDatabase.incrementUserJoinCount(TEST_GUILD_ID_LONG, TEST_USER_ID)).thenReturn(1L);
 
         // Execute
         listener.onGuildVoiceUpdate(mockEvent);
@@ -136,13 +171,15 @@ class LoginListenerTest {
         when(mockEvent.getChannelLeft()).thenReturn(null);
         when(mockEvent.getChannelJoined()).thenReturn(mockAudioChannel);
         when(mockConfigDatabase.getBotChannelId(TEST_GUILD_ID_LONG)).thenReturn(null);
+        when(mockConfigDatabase.incrementUserJoinCount(TEST_GUILD_ID_LONG, TEST_USER_ID)).thenReturn(1L);
 
         // Execute
         listener.onGuildVoiceUpdate(mockEvent);
 
         // Verify no milestone message was sent
         verify(mockTextChannel, never()).sendMessageEmbeds(any(MessageEmbed.class));
-        assertEquals(1L, listener.getVoiceJoinCount(TEST_GUILD_ID, TEST_USER_ID)); // Count still increments
+        // Verify count still increments
+        verify(mockConfigDatabase).incrementUserJoinCount(TEST_GUILD_ID_LONG, TEST_USER_ID);
     }
 
     @Test
@@ -155,8 +192,8 @@ class LoginListenerTest {
         // Execute
         listener.onGuildVoiceUpdate(mockEvent);
 
-        // Verify - count should not increment
-        assertEquals(0L, listener.getVoiceJoinCount(TEST_GUILD_ID, TEST_USER_ID));
+        // Verify - database method should not be called
+        verify(mockConfigDatabase, never()).incrementUserJoinCount(anyLong(), anyLong());
     }
 
     @Test
@@ -169,8 +206,8 @@ class LoginListenerTest {
         // Execute
         listener.onGuildVoiceUpdate(mockEvent);
 
-        // Verify - count should not increment
-        assertEquals(0L, listener.getVoiceJoinCount(TEST_GUILD_ID, TEST_USER_ID));
+        // Verify - database method should not be called
+        verify(mockConfigDatabase, never()).incrementUserJoinCount(anyLong(), anyLong());
     }
 
     @Test
@@ -179,11 +216,17 @@ class LoginListenerTest {
         // Setup different guild
         Guild mockGuild2 = mock(Guild.class);
         when(mockGuild2.getId()).thenReturn("987654321");
+        when(mockGuild2.getIdLong()).thenReturn(987654321L);
         when(mockGuild2.getName()).thenReturn("Test Guild 2");
+
+        Member mockMember2 = mock(Member.class);
+        when(mockMember2.getGuild()).thenReturn(mockGuild2);
+        when(mockMember2.getIdLong()).thenReturn(TEST_USER_ID);
+        when(mockMember2.getEffectiveName()).thenReturn("TestUser");
 
         GuildVoiceUpdateEvent mockEvent2 = mock(GuildVoiceUpdateEvent.class);
         when(mockEvent2.getGuild()).thenReturn(mockGuild2);
-        when(mockEvent2.getMember()).thenReturn(mockMember);
+        when(mockEvent2.getMember()).thenReturn(mockMember2);
         when(mockEvent2.getChannelLeft()).thenReturn(null);
         when(mockEvent2.getChannelJoined()).thenReturn(mockAudioChannel);
 
@@ -191,14 +234,20 @@ class LoginListenerTest {
         when(mockEvent.getChannelLeft()).thenReturn(null);
         when(mockEvent.getChannelJoined()).thenReturn(mockAudioChannel);
 
+        // Mock return values
+        when(mockConfigDatabase.incrementUserJoinCount(TEST_GUILD_ID_LONG, TEST_USER_ID))
+                .thenReturn(1L, 2L);
+        when(mockConfigDatabase.incrementUserJoinCount(987654321L, TEST_USER_ID))
+                .thenReturn(1L);
+
         // Execute joins in different guilds
         listener.onGuildVoiceUpdate(mockEvent);  // Guild 1
         listener.onGuildVoiceUpdate(mockEvent2); // Guild 2
         listener.onGuildVoiceUpdate(mockEvent);  // Guild 1 again
 
-        // Verify separate counts
-        assertEquals(2L, listener.getVoiceJoinCount(TEST_GUILD_ID, TEST_USER_ID));
-        assertEquals(1L, listener.getVoiceJoinCount("987654321", TEST_USER_ID));
+        // Verify separate database calls were made
+        verify(mockConfigDatabase, times(2)).incrementUserJoinCount(TEST_GUILD_ID_LONG, TEST_USER_ID);
+        verify(mockConfigDatabase, times(1)).incrementUserJoinCount(987654321L, TEST_USER_ID);
     }
 
     @Test
@@ -209,12 +258,21 @@ class LoginListenerTest {
         when(mockEvent.getChannelLeft()).thenReturn(null);
         when(mockEvent.getChannelJoined()).thenReturn(mockAudioChannel);
 
+        // Mock incremental return values for 100 calls
+        Long[] returnValues = new Long[100];
+        for (int i = 0; i < 100; i++) {
+            returnValues[i] = (long) (i + 1);
+        }
+        when(mockConfigDatabase.incrementUserJoinCount(TEST_GUILD_ID_LONG, TEST_USER_ID))
+                .thenReturn(returnValues[0], returnValues);
+
         // Execute joins up to milestone 100
         for (int i = 1; i <= 100; i++) {
             listener.onGuildVoiceUpdate(mockEvent);
         }
 
-        assertEquals(100L, listener.getVoiceJoinCount(TEST_GUILD_ID, TEST_USER_ID));
+        // Verify database was called 100 times
+        verify(mockConfigDatabase, times(100)).incrementUserJoinCount(TEST_GUILD_ID_LONG, TEST_USER_ID);
     }
 
     @Test
