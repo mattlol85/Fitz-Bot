@@ -1,22 +1,24 @@
 # Fitz-Bot
 
-A Discord bot built with Java and Spring Boot that tracks voice channel joins and sends milestone congratulations. The bot features automatic channel cleanup and configurable per-server settings.
+A Discord bot built with Java and Spring Boot that tracks voice channel joins and sends milestone congratulations. The bot features automatic channel cleanup, configurable per-server settings, and persistent data tracking with "as of" date functionality.
 
 ## Features
 
 - 🎤 **Voice Join Tracking** - Tracks when users join voice channels (not moves between channels)
+- 📅 **As Of Date Tracking** - Automatically records when tracking started for each server for accurate milestone context
 - 🏆 **Milestone Celebrations** - Sends congratulatory messages at configurable milestones (default: 1, 5, 10, 25, 50, 100, 250, 500, 1000 joins)
+- 💾 **Persistent Data Storage** - Voice join counts and tracking dates persist between bot restarts
 - 🗑️ **Smart Channel Cleanup** - Automatically deletes empty temporary voice channels
 - 🏠 **Multi-Server Support** - Each Discord server has its own isolated configuration and data
 - ⚙️ **Configurable Bot Channels** - Set which channel receives milestone notifications per server
 - 🔧 **REST API Management** - Full bot control via HTTP endpoints
-- 📊 **In-Memory Statistics** - Fast voice join counting without persistent storage overhead
+- 📊 **Reliable Statistics** - Robust data persistence with JSON serialization and MongoDB-ready schema
 
 ## Tech Stack
 
 - **Java 17+** with Spring Boot 3.2.6
 - **JDA 5.0.0-beta.21** (Java Discord API)
-- **Jackson** for JSON processing
+- **Jackson** with JavaTimeModule for JSON processing and LocalDateTime serialization
 - **Lombok** for clean POJOs
 - **Gradle** for build management
 
@@ -102,15 +104,60 @@ Each Discord server can configure:
 - **Bot Channel**: Where milestone messages are sent
 - **Custom Milestones**: Override default milestone thresholds (future feature)
 
-### Data Storage
-- **Voice Join Counts**: Stored in memory (reset on restart)
-- **Server Configurations**: Saved to `data/guild_configs.json`
+### As Of Date Tracking
+The bot automatically tracks when voice channel monitoring begins for each server:
+- **Automatic Initialization**: Tracking date is set when the first user joins a voice channel
+- **Persistent Storage**: Dates survive bot restarts and are stored in JSON format
+- **Per-Server Tracking**: Each Discord server has its own independent tracking start date
+- **Milestone Context**: Provides accurate "since [date]" context for milestone celebrations
+
+### Data Storage & Persistence
+- **Voice Join Counts**: Persistently stored in `data/guild_configs.json` with automatic backup
+- **Server Configurations**: Saved with robust JSON serialization using Jackson + JavaTimeModule
+- **Tracking Dates**: Stored as ISO 8601 LocalDateTime strings for precision and readability
+- **Data Integrity**: Comprehensive test coverage ensures reliable persistence across restarts
+
+#### JSON Schema Structure
+```json
+{
+  "123456789": {
+    "botChannelId": "987654321",
+    "milestones": null,
+    "trackingStartDate": "2025-08-02T22:42:48.1057174",
+    "userJoinCounts": {
+      "111111111": 25,
+      "222222222": 10
+    }
+  }
+}
+```
+
+#### MongoDB Migration Ready
+For production deployments, a MongoDB-optimized schema is available at `schemas/mongodb-guild-config-schema.json`:
+- Document-based structure with proper indexing
+- Metadata tracking (createdAt, updatedAt, version)
+- Schema validation and type safety
+- Scalable design for enterprise use
 
 ### Channel Deletion Rules
 The bot automatically deletes empty voice channels that match these patterns:
 - Names starting with `temp-` or `room-`
 - Names containing `private`
 - Names containing numbers (user-created rooms)
+
+## Data Management
+
+### Tracking Lifecycle
+1. **First User Joins**: Bot automatically initializes tracking date for the server
+2. **Subsequent Joins**: Increments user count and checks for milestone achievements
+3. **Milestone Reached**: Sends congratulatory message with "since [tracking date]" context
+4. **Data Persistence**: Automatically saves all changes to disk
+
+### Data Migration & Backup
+- **Automatic Serialization**: All data automatically saved on changes
+- **Cross-Platform Compatibility**: JSON format works across different operating systems
+- **MongoDB Ready**: Easy migration path to MongoDB for larger deployments
+- **Version Control**: Schema versioning support for future data migrations
 
 ## Development
 

@@ -1,12 +1,14 @@
 package org.fitznet.data.model;
 
 import com.fasterxml.jackson.annotation.JsonIgnore;
+import com.fasterxml.jackson.annotation.JsonSetter;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 import org.fitznet.util.Constants;
 
+import java.time.LocalDateTime;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 
@@ -35,6 +37,34 @@ public class GuildConfig {
      */
     @Builder.Default
     private Map<Long, Long> userJoinCounts = new ConcurrentHashMap<>();
+
+    /**
+     * The date and time when this guild started tracking voice channel joins.
+     * Set when the first user joins a voice channel or when tracking is manually initialized.
+     * -- GETTER --
+     *  Gets the tracking start date or returns null if tracking hasn't started.
+     *
+
+     */
+    private LocalDateTime trackingStartDate;
+
+    /**
+     * Custom setter for Jackson deserialization to ensure userJoinCounts is never null.
+     */
+    @JsonSetter("userJoinCounts")
+    public void setUserJoinCounts(Map<Long, Long> userJoinCounts) {
+        this.userJoinCounts = userJoinCounts != null ? new ConcurrentHashMap<>(userJoinCounts) : new ConcurrentHashMap<>();
+    }
+
+    /**
+     * Getter that ensures userJoinCounts is never null.
+     */
+    public Map<Long, Long> getUserJoinCounts() {
+        if (userJoinCounts == null) {
+            userJoinCounts = new ConcurrentHashMap<>();
+        }
+        return userJoinCounts;
+    }
 
     /**
      * Gets milestones or returns default values if not configured.
@@ -81,5 +111,25 @@ public class GuildConfig {
      */
     public void resetUserJoinCount(long userId) {
         userJoinCounts.remove(userId);
+    }
+
+    /**
+     * Initializes tracking start date if not already set.
+     * This should be called when the first user action is tracked.
+     */
+    public void initializeTrackingIfNeeded() {
+        if (trackingStartDate == null) {
+            trackingStartDate = LocalDateTime.now();
+        }
+    }
+
+    /**
+     * Checks if tracking has been initialized for this guild.
+     *
+     * @return true if tracking has started, false otherwise
+     */
+    @JsonIgnore
+    public boolean isTrackingInitialized() {
+        return trackingStartDate != null;
     }
 }

@@ -34,14 +34,18 @@ public class GuildConfigDatabase {
      * Creates the data directory if it doesn't exist.
      */
     private void createDataDirectory() {
-        File dir = new File("data");
-        log.info("Checking data directory at: {}", dir.getAbsolutePath());
+        File configFileObj = new File(configFile);
+        File dir = configFileObj.getParentFile();
 
-        if (!dir.exists()) {
-            boolean created = dir.mkdirs();
-            log.info("Created data directory: {} at path: {}", created, dir.getAbsolutePath());
-        } else {
-            log.info("Data directory already exists at: {}", dir.getAbsolutePath());
+        if (dir != null) {
+            log.info("Checking data directory at: {}", dir.getAbsolutePath());
+
+            if (!dir.exists()) {
+                boolean created = dir.mkdirs();
+                log.info("Created data directory: {} at path: {}", created, dir.getAbsolutePath());
+            } else {
+                log.info("Data directory already exists at: {}", dir.getAbsolutePath());
+            }
         }
     }
 
@@ -54,9 +58,24 @@ public class GuildConfigDatabase {
             log.info("Loading config from: {}", file.getAbsolutePath());
 
             if (file.exists() && file.length() > 0) {
+                log.debug("Config file size: {} bytes", file.length());
                 Map<Long, GuildConfig> loadedConfigs = JsonUtils.MAPPER.readValue(file, new TypeReference<>() {});
-                guildConfigs.putAll(loadedConfigs);
-                log.info("Loaded configurations for {} guilds from {}", loadedConfigs.size(), file.getAbsolutePath());
+
+                if (loadedConfigs != null) {
+                    guildConfigs.putAll(loadedConfigs);
+                    log.info("Loaded configurations for {} guilds from {}", loadedConfigs.size(), file.getAbsolutePath());
+
+                    // Debug log the loaded data
+                    for (Map.Entry<Long, GuildConfig> entry : loadedConfigs.entrySet()) {
+                        GuildConfig config = entry.getValue();
+                        if (config.getUserJoinCounts() != null && !config.getUserJoinCounts().isEmpty()) {
+                            log.debug("Guild {} has {} user join counts, tracking initialized: {}",
+                                    entry.getKey(), config.getUserJoinCounts().size(), config.isTrackingInitialized());
+                        }
+                    }
+                } else {
+                    log.warn("Loaded configs is null from file: {}", file.getAbsolutePath());
+                }
             } else {
                 if (!file.exists()) {
                     // Ensure parent directory exists
@@ -184,6 +203,10 @@ public class GuildConfigDatabase {
      */
     public long incrementUserJoinCount(long guildId, long userId) {
         GuildConfig config = guildConfigs.computeIfAbsent(guildId, k -> new GuildConfig());
+
+        // Initialize tracking date if this is the first interaction
+        config.initializeTrackingIfNeeded();
+
         long newCount = config.incrementUserJoinCount(userId);
         saveConfigs();
         return newCount;
@@ -230,5 +253,27 @@ public class GuildConfigDatabase {
             log.info("Reset join count for user {} in guild {}", userId, guildId);
         }
         return hadCount;
+    }
+
+    /**
+     * Gets the tracking start date for a specific guild.
+     *
+     * @param guildId the Discord guild ID
+     * @return the tracking start date, or null if not initialized
+     */
+    public java.time.LocalDateTime getTrackingStartDate(long guildId) {
+        GuildConfig config = guildConfigs.get(guildId);
+        return config != null ? config.getTrackingStartDate() : null;
+    }
+
+    /**
+     * Checks if tracking has been initialized for a guild.
+     *
+     * @param guildId the Discord guild ID
+     * @return true if tracking has started, false otherwise
+     */
+    public boolean isTrackingInitialized(long guildId) {
+        GuildConfig config = guildConfigs.get(guildId);
+        return config != null && config.isTrackingInitialized();
     }
 }

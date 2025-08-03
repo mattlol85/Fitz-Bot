@@ -162,7 +162,10 @@ public class LoginListener extends ListenerAdapter {
         }
 
         try {
-            MessageEmbed embed = EmbedUtil.createMilestoneEmbed(member, milestone);
+            // Get the tracking start date for this guild
+            java.time.LocalDateTime trackingStartDate = configDatabase.getTrackingStartDate(guild.getIdLong());
+            
+            MessageEmbed embed = EmbedUtil.createMilestoneEmbed(member, milestone, trackingStartDate);
             botChannel.sendMessageEmbeds(embed)
                     .queue(
                             message -> log.info("Milestone message sent for {} reaching {} joins in guild {} (channel: {})",
