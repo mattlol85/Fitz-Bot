@@ -141,23 +141,24 @@ jobs:
         MINOR=${VERSION_PARTS[1]:-5}
         PATCH=${VERSION_PARTS[2]:-0}
         
-        # Check commit message for version increment type
-        COMMIT_MSG="${{ github.event.head_commit.message }}"
-        echo "📝 Commit message: $COMMIT_MSG"
+        # Read commit message safely from git to avoid script injection/splitting
+        COMMIT_MSG="$(git log -1 --pretty=%B || echo "")"
+        echo "📝 Commit message:"
+        echo "$COMMIT_MSG"
         
-        if [[ $COMMIT_MSG =~ ^major|major\( ]]; then
+        if [[ "$COMMIT_MSG" =~ ^major(\(|:) ]]; then
           NEW_MAJOR=$((MAJOR + 1))
           NEW_MINOR=0
           NEW_PATCH=0
           INCREMENT_TYPE="major"
           EMOJI="🚀"
-        elif [[ $COMMIT_MSG =~ ^fix\(|^fix: ]]; then
+        elif [[ "$COMMIT_MSG" =~ ^(fix\(|fix:) ]]; then
           NEW_MAJOR=$MAJOR
           NEW_MINOR=$MINOR
           NEW_PATCH=$((PATCH + 1))
           INCREMENT_TYPE="patch"
           EMOJI="🐛"
-        elif [[ $COMMIT_MSG =~ ^chore\( ]]; then
+        elif [[ "$COMMIT_MSG" =~ ^chore\( ]]; then
           NEW_MAJOR=$MAJOR
           NEW_MINOR=$MINOR
           NEW_PATCH=$((PATCH + 1))
@@ -289,29 +290,37 @@ jobs:
         JAR_PATH="${{ steps.final-jar.outputs.jar-path }}"
         JAR_NAME="${{ steps.final-jar.outputs.jar-name }}"
         
+        # Safely capture the last commit message
+        COMMIT_MSG="$(git log -1 --pretty=%B || echo "")"
+        
+        # Build release notes in a temp file to avoid quoting/injection issues
+        NOTES_FILE=$(mktemp)
+        {
+          echo "## $EMOJI Changes";
+          echo "Auto-generated release for **$NEW_VERSION**";
+          echo "";
+          echo "**📈 Increment Type:** $INCREMENT_TYPE  ";
+          echo "**🔨 Build:** #${{ github.run_number }}  ";
+          echo "**📝 Commit:** \`${{ github.sha }}\`  ";
+          echo "**👤 Triggered by:** ${{ github.actor }}";
+          echo "";
+          echo "### 📦 Downloads";
+          echo "- **JAR File:** \`$JAR_NAME\`";
+          echo "";
+          echo "### 💬 Commit Message";
+          echo '```';
+          echo "$COMMIT_MSG";
+          echo '```';
+          echo "";
+          echo "### 🚀 Installation";
+          echo "\`\`\`bash";
+          echo "java -jar $JAR_NAME";
+          echo "\`\`\`";
+        } > "$NOTES_FILE"
+        
         gh release create "$NEW_VERSION" \
           --title "$EMOJI Release $NEW_VERSION" \
-          --notes "## $EMOJI Changes
-        Auto-generated release for **$NEW_VERSION**
-        
-        **📈 Increment Type:** $INCREMENT_TYPE  
-        **🔨 Build:** #${{ github.run_number }}  
-        **📝 Commit:** \`${{ github.sha }}\`  
-        **👤 Triggered by:** ${{ github.actor }}
-        
-        ### 📦 Downloads
-        - **JAR File:** \`$JAR_NAME\`
-        
-        ### 💬 Commit Message
-        \`\`\`
-        ${{ github.event.head_commit.message }}
-        \`\`\`
-        
-        ### 🚀 Installation
-        Download the JAR file and run with:
-        \`\`\`bash
-        java -jar $JAR_NAME
-        \`\`\`" \
+          --notes-file "$NOTES_FILE" \
           "$JAR_PATH"
         
         echo "✅ GitHub Release created successfully!"
