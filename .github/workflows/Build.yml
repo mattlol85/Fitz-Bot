@@ -216,7 +216,7 @@ jobs:
         
         # Create new JAR name with correct version
         # Extract base name without version and add new version
-        BASE_NAME=$(echo "$ORIGINAL_NAME" | sed 's/-[0-9]\+\.[0-9]\+\.[0-9]\+.*\.jar$/'/')
+        BASE_NAME=$(echo "$ORIGINAL_NAME" | sed 's/-[0-9]\+\.[0-9]\+\.[0-9]\+.*\.jar$//')
         NEW_JAR_NAME="${BASE_NAME}-${NEW_VERSION}.jar"
         NEW_JAR_PATH="./downloaded-jar/$NEW_JAR_NAME"
         
