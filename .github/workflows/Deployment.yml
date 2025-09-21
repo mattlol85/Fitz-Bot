@@ -112,6 +112,78 @@ jobs:
         ssh pi "
           echo 'Stopping Fitz-Bot service...'
           
+          # Function to gracefully stop the application
+          graceful_shutdown() {
+            local max_wait=30
+            local wait_interval=2
+            local waited=0
+            
+            echo 'Attempting graceful shutdown...'
+            
+            # Try graceful shutdown via REST API if port is open
+            if netstat -tuln 2>/dev/null | grep ':8080' > /dev/null; then
+              echo 'Sending shutdown request to REST API...'
+              curl -X POST http://localhost:8080/bot/shutdown -m 5 2>/dev/null || echo 'REST API shutdown failed or not available'
+              sleep 3
+            fi
+            
+            # Check if process is still running
+            if ! pgrep -f 'fitz.*jar' > /dev/null 2>&1; then
+              echo '✅ Application stopped gracefully'
+              return 0
+            fi
+            
+            # Send TERM signal for graceful shutdown
+            echo 'Sending SIGTERM signal...'
+            pkill -TERM -f 'fitz.*jar' 2>/dev/null || true
+            
+            # Wait for graceful shutdown
+            while [ \$waited -lt \$max_wait ] && pgrep -f 'fitz.*jar' > /dev/null 2>&1; do
+              echo \"Waiting for graceful shutdown... (\${waited}s/\${max_wait}s)\"
+              sleep \$wait_interval
+              waited=\$((waited + wait_interval))
+            done
+            
+            # Force kill if still running
+            if pgrep -f 'fitz.*jar' > /dev/null 2>&1; then
+              echo 'Graceful shutdown timeout, force killing...'
+              pkill -KILL -f 'fitz.*jar' 2>/dev/null || true
+              sleep 2
+            fi
+            
+            return 0
+          }
+          
+          # Function to ensure port 8080 is free
+          free_port_8080() {
+            local max_attempts=5
+            local attempt=1
+            
+            while [ \$attempt -le \$max_attempts ]; do
+              if ! netstat -tuln 2>/dev/null | grep ':8080' > /dev/null; then
+                echo '✅ Port 8080 is free'
+                return 0
+              fi
+              
+              echo \"Port 8080 still in use, attempt \$attempt/\$max_attempts\"
+              
+              # Find and kill processes using port 8080
+              PORT_PIDS=\$(netstat -tulnp 2>/dev/null | grep ':8080' | awk '{print \$7}' | cut -d'/' -f1 | grep -v '-' | sort -u)
+              
+              if [ -n \"\$PORT_PIDS\" ]; then
+                echo \"Killing processes using port 8080: \$PORT_PIDS\"
+                echo \"\$PORT_PIDS\" | xargs -r kill -TERM 2>/dev/null || true
+                sleep 3
+                echo \"\$PORT_PIDS\" | xargs -r kill -KILL 2>/dev/null || true
+                sleep 2
+              fi
+              
+              attempt=\$((attempt + 1))
+            done
+            
+            return 0
+          }
+          
           # Stop systemd service if it exists
           if systemctl is-active --quiet fitz-bot 2>/dev/null; then
             sudo systemctl stop fitz-bot
@@ -120,17 +192,12 @@ jobs:
             echo 'ℹ️  fitz-bot service not running'
           fi
           
-          # Kill any running Java processes for the bot (backup method)
-          if pgrep -f 'fitz.*jar' > /dev/null 2>&1; then
-            echo 'Killing existing bot processes...'
-            pkill -f 'fitz.*jar' 2>/dev/null || true
-            sleep 2
-            echo '✅ Stopped existing processes'
-          else
-            echo 'ℹ️  No existing bot processes found'
-          fi
+          # Execute graceful shutdown
+          graceful_shutdown
           
-          # Ensure we always exit successfully from this step
+          # Ensure port is free
+          free_port_8080
+          
           echo 'Stop process completed successfully'
         " || {
           echo 'ℹ️  SSH command completed with warnings (this is normal on first deployment)'
@@ -180,11 +247,24 @@ jobs:
             echo "Creating default application.properties..."
             echo "# Fitz-Bot Configuration" > config/application.properties
             echo "server.port=8080" >> config/application.properties
+            echo "server.shutdown=graceful" >> config/application.properties
+            echo "spring.lifecycle.timeout-per-shutdown-phase=30s" >> config/application.properties
+            echo "" >> config/application.properties
+            echo "# Logging configuration" >> config/application.properties
             echo "logging.level.org.fitznet=INFO" >> config/application.properties
             echo "logging.file.name=logs/fitz-bot.log" >> config/application.properties
+            echo "logging.pattern.file=%d{yyyy-MM-dd HH:mm:ss} [%thread] %-5level %logger{36} - %msg%n" >> config/application.properties
+            echo "logging.pattern.console=%d{HH:mm:ss.SSS} [%thread] %-5level %logger{36} - %msg%n" >> config/application.properties
             echo "✅ Created default configuration"
           else
             echo "ℹ️  Configuration file already exists"
+            
+            # Ensure graceful shutdown is configured
+            if ! grep -q "server.shutdown=graceful" config/application.properties; then
+              echo "server.shutdown=graceful" >> config/application.properties
+              echo "spring.lifecycle.timeout-per-shutdown-phase=30s" >> config/application.properties
+              echo "✅ Added graceful shutdown configuration"
+            fi
           fi
           
           # Set version info
@@ -201,25 +281,78 @@ jobs:
         ssh pi "
           cd ~/fitz-bot
           
-          # Start the application in the background with Discord token from environment
-          echo 'Starting Fitz-Bot...'
-          DISCORD_BOT_TOKEN='${{ secrets.DISCORD_BOT_TOKEN }}' nohup java -jar current.jar \
-            --spring.config.location=config/application.properties \
-            > logs/fitz-bot.log 2>&1 &
+          # Function to start application with proper monitoring
+          start_application() {
+            echo 'Starting Fitz-Bot...'
+            
+            # Double-check port is free before starting
+            if netstat -tuln 2>/dev/null | grep ':8080' > /dev/null; then
+              echo '❌ Port 8080 is still in use! Cannot start application.'
+              return 1
+            fi
+            
+            # Start the application with proper JVM settings
+            DISCORD_BOT_TOKEN='${{ secrets.DISCORD_BOT_TOKEN }}' nohup java \
+              -Xms256m -Xmx512m \
+              -XX:+UseG1GC \
+              -XX:MaxGCPauseMillis=100 \
+              -jar current.jar \
+              --spring.config.location=config/application.properties \
+              > logs/fitz-bot.log 2>&1 &
+            
+            local APP_PID=\$!
+            echo \"Application started with PID: \$APP_PID\"
+            echo \$APP_PID > config/app.pid
+            
+            return 0
+          }
           
-          echo 'Application started with PID: '\$!
+          # Function to wait for application readiness
+          wait_for_readiness() {
+            local max_wait=60
+            local wait_interval=3
+            local waited=0
+            
+            echo 'Waiting for application to become ready...'
+            
+            while [ \$waited -lt \$max_wait ]; do
+              # Check if process is still running
+              if [ -f config/app.pid ]; then
+                local PID=\$(cat config/app.pid)
+                if ! kill -0 \$PID 2>/dev/null; then
+                  echo \"❌ Process \$PID died during startup\"
+                  echo \"Last 10 lines of log:\"
+                  tail -10 logs/fitz-bot.log 2>/dev/null || echo \"No log found\"
+                  return 1
+                fi
+              fi
+              
+              # Check if port is listening (indicates Spring Boot is ready)
+              if netstat -tuln 2>/dev/null | grep ':8080.*LISTEN' > /dev/null; then
+                echo \"✅ Application is listening on port 8080\"
+                sleep 2  # Give it a moment to fully initialize
+                return 0
+              fi
+              
+              echo \"Waiting for startup... (\${waited}s/\${max_wait}s)\"
+              sleep \$wait_interval
+              waited=\$((waited + wait_interval))
+            done
+            
+            echo \"❌ Application startup timeout after \${max_wait} seconds\"
+            return 1
+          }
           
-          # Wait a moment for startup
-          sleep 5
-          
-          # Check if application is running
-          if pgrep -f 'current.jar' > /dev/null; then
-            echo '✅ Fitz-Bot is running successfully!'
-            echo 'PID: '$(pgrep -f 'current.jar')
+          # Execute startup sequence
+          if start_application && wait_for_readiness; then
+            echo \"✅ Fitz-Bot started successfully and is ready!\"
+            if [ -f config/app.pid ]; then
+              echo \"PID: \$(cat config/app.pid)\"
+            fi
           else
-            echo '❌ Failed to start Fitz-Bot'
-            echo 'Last 10 lines of log:'
-            tail -10 logs/fitz-bot.log || echo 'No log file found'
+            echo \"❌ Failed to start Fitz-Bot\"
+            echo \"Recent log entries:\"
+            tail -20 logs/fitz-bot.log 2>/dev/null || echo \"No log file found\"
             exit 1
           fi
         "

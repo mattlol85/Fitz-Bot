@@ -1,4 +1,4 @@
-package org.fitznet;
+package org.fitznet.controller;
 
 import lombok.extern.slf4j.Slf4j;
 import org.fitznet.service.BotService;
