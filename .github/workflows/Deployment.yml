@@ -158,7 +158,7 @@ jobs:
           
           # Function to aggressively ensure port 8080 is free
           free_port_8080() {
-            local max_attempts=10
+            local max_attempts=15
             local attempt=1
             
             echo 'Ensuring port 8080 is completely free...'
@@ -186,7 +186,7 @@ jobs:
                   echo \"Killing PID \$pid\"
                   kill -TERM \$pid 2>/dev/null || true
                 done
-                sleep 3
+                sleep 5  # Increased wait time
                 
                 # Force kill if still there
                 for pid in \$PORT_PIDS; do
@@ -195,7 +195,7 @@ jobs:
                     kill -KILL \$pid 2>/dev/null || true
                   fi
                 done
-                sleep 2
+                sleep 3
               fi
               
               # Alternative method using lsof if available
@@ -205,8 +205,9 @@ jobs:
                 if [ -n \"\$LSOF_PIDS\" ]; then
                   echo \"lsof found PIDs: \$LSOF_PIDS\"
                   echo \$LSOF_PIDS | xargs -r kill -TERM 2>/dev/null || true
-                  sleep 2
+                  sleep 3
                   echo \$LSOF_PIDS | xargs -r kill -KILL 2>/dev/null || true
+                  sleep 2
                 fi
               fi
               
@@ -214,16 +215,35 @@ jobs:
               if command -v fuser >/dev/null 2>&1; then
                 echo 'Using fuser to kill port 8080 processes...'
                 fuser -k 8080/tcp 2>/dev/null || true
-                sleep 2
+                sleep 3
               fi
               
               attempt=\$((attempt + 1))
-              sleep 1
+              sleep 2  # Increased wait between attempts
+            done
+            
+            # Final aggressive check - try multiple times with delays
+            for final_attempt in 1 2 3 4 5; do
+              if ! netstat -tuln 2>/dev/null | grep ':8080' > /dev/null; then
+                echo \"✅ Port 8080 successfully freed (final attempt \$final_attempt)\"
+                return 0
+              fi
+              
+              echo \"Final attempt \$final_attempt: Port still in use, waiting...\"
+              
+              # One more aggressive kill attempt
+              PORT_PIDS=\$(netstat -tulnp 2>/dev/null | grep ':8080' | awk '{print \$7}' | cut -d'/' -f1 | grep -E '^[0-9]+\$' | sort -u)
+              if [ -n \"\$PORT_PIDS\" ]; then
+                echo \"Final kill attempt for PIDs: \$PORT_PIDS\"
+                echo \$PORT_PIDS | xargs -r kill -KILL 2>/dev/null || true
+              fi
+              
+              sleep 5
             done
             
             # Final check
             if netstat -tuln 2>/dev/null | grep ':8080' > /dev/null; then
-              echo '⚠️  Port 8080 still in use after all attempts'
+              echo '❌ Port 8080 still in use after all attempts'
               echo 'Final port status:'
               netstat -tulnp 2>/dev/null | grep ':8080' || true
               ss -tulnp 2>/dev/null | grep ':8080' || true
@@ -242,18 +262,36 @@ jobs:
             echo 'ℹ️  fitz-bot service not running'
           fi
           
-          # Kill any Java processes that might be our bot
+          # Kill any Java processes that might be our bot - more aggressive
           echo 'Killing any existing bot processes...'
-          pkill -f 'FitzcordBot.*\.jar' 2>/dev/null || true
-          pkill -f 'current\.jar' 2>/dev/null || true
-          pkill -f 'java.*fitz' 2>/dev/null || true
-          sleep 3
+          pkill -9 -f 'FitzcordBot.*\.jar' 2>/dev/null || true
+          pkill -9 -f 'current\.jar' 2>/dev/null || true
+          pkill -9 -f 'java.*fitz' 2>/dev/null || true
+          pkill -9 -f 'java.*8080' 2>/dev/null || true
+          sleep 5
           
           # Execute graceful shutdown
           graceful_shutdown
           
           # Aggressively ensure port is free
-          free_port_8080
+          if ! free_port_8080; then
+            echo '⚠️  Warning: Could not completely free port 8080, attempting to continue anyway'
+          fi
+          
+          # Additional wait to ensure everything is settled
+          echo 'Waiting 10 seconds for system to settle...'
+          sleep 10
+          
+          # Final verification
+          if netstat -tuln 2>/dev/null | grep ':8080' > /dev/null; then
+            echo '❌ CRITICAL: Port 8080 still in use after all cleanup attempts!'
+            echo 'Current port usage:'
+            netstat -tulnp 2>/dev/null | grep ':8080' || true
+            ss -tulnp 2>/dev/null | grep ':8080' || true
+            exit 1
+          else
+            echo '✅ CONFIRMED: Port 8080 is completely free'
+          fi
           
           echo 'Stop process completed successfully'
         " || {
