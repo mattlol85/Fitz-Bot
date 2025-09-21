@@ -276,4 +276,19 @@ public class GuildConfigDatabase {
         GuildConfig config = guildConfigs.get(guildId);
         return config != null && config.isTrackingInitialized();
     }
+
+    /**
+     * Forces initialization of tracking for a guild, even if it already exists.
+     * This is useful for existing guilds that were created before tracking dates were implemented.
+     *
+     * @param guildId the Discord guild ID
+     */
+    public void forceInitializeTracking(long guildId) {
+        GuildConfig config = guildConfigs.computeIfAbsent(guildId, k -> new GuildConfig());
+        if (config.getTrackingStartDate() == null) {
+            config.initializeTrackingIfNeeded();
+            saveConfigs();
+            log.info("Initialized tracking date for guild {}", guildId);
+        }
+    }
 }

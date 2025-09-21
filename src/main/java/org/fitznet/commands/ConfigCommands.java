@@ -35,7 +35,8 @@ public class ConfigCommands extends ListenerAdapter {
             Commands.slash("setbotchannel", "Set the channel for bot milestone messages")
                 .addOption(OptionType.CHANNEL, "channel", "The text channel to use for bot messages", true),
             Commands.slash("getbotchannel", "Show the current bot channel configuration"),
-            Commands.slash("resetjoincounts", "Reset all voice join counts for this server (Admin only)")
+            Commands.slash("resetjoincounts", "Reset all voice join counts for this server (Admin only)"),
+            Commands.slash("initializetracking", "Initialize tracking date for this server (Admin only)")
         };
     }
 
@@ -61,6 +62,7 @@ public class ConfigCommands extends ListenerAdapter {
                 case "setbotchannel" -> handleSetBotChannel(event);
                 case "getbotchannel" -> handleGetBotChannel(event);
                 case "resetjoincounts" -> handleResetJoinCounts(event);
+                case "initializetracking" -> handleInitializeTracking(event);
                 default -> {
                     log.warn("Unknown command: {}", event.getName());
                     event.getHook().editOriginal("❌ Unknown command").queue();
@@ -184,6 +186,45 @@ public class ConfigCommands extends ListenerAdapter {
         } catch (Exception e) {
             log.error("Error in handleResetJoinCounts", e);
             event.getHook().editOriginal("❌ An error occurred while resetting join counts: " + e.getMessage()).queue();
+        }
+    }
+
+    private void handleInitializeTracking(SlashCommandInteractionEvent event) {
+        log.info("Processing initializetracking command for guild: {}", event.getGuild().getName());
+
+        try {
+            // Check permissions
+            if (event.getMember() == null || !event.getMember().hasPermission(Permission.ADMINISTRATOR)) {
+                log.warn("User {} lacks ADMINISTRATOR permission", event.getUser().getName());
+                event.getHook().editOriginal("❌ You need the 'Administrator' permission to use this command!").queue();
+                return;
+            }
+
+            long guildId = event.getGuild().getIdLong();
+
+            // Check if tracking is already initialized
+            if (configDatabase.isTrackingInitialized(guildId)) {
+                java.time.LocalDateTime startDate = configDatabase.getTrackingStartDate(guildId);
+                String formattedDate = startDate.format(java.time.format.DateTimeFormatter.ofPattern("MMM dd, yyyy"));
+                event.getHook().editOriginal("ℹ️ Tracking is already initialized for this server since " + formattedDate + ".").queue();
+                return;
+            }
+
+            // Force initialize tracking date in the database
+            configDatabase.forceInitializeTracking(guildId);
+
+            java.time.LocalDateTime startDate = configDatabase.getTrackingStartDate(guildId);
+            String formattedDate = startDate.format(java.time.format.DateTimeFormatter.ofPattern("MMM dd, yyyy"));
+
+            log.info("Successfully initialized tracking date for guild {}", guildId);
+
+            // Send success response
+            event.getHook().editOriginal("✅ Tracking date initialized for this server starting " + formattedDate + "!\n" +
+                    "Milestone messages will now include the tracking start date.").queue();
+
+        } catch (Exception e) {
+            log.error("Error in handleInitializeTracking", e);
+            event.getHook().editOriginal("❌ An error occurred while initializing tracking date: " + e.getMessage()).queue();
         }
     }
 }
