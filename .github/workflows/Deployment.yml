@@ -124,11 +124,11 @@ jobs:
             if netstat -tuln 2>/dev/null | grep ':8080' > /dev/null; then
               echo 'Sending shutdown request to REST API...'
               curl -X POST http://localhost:8080/bot/shutdown -m 5 2>/dev/null || echo 'REST API shutdown failed or not available'
-              sleep 3
+              sleep 5  # Give more time for graceful shutdown
             fi
             
             # Check if process is still running
-            if ! pgrep -f 'fitz.*jar' > /dev/null 2>&1; then
+            if ! pgrep -f 'fitz.*jar\|current\.jar' > /dev/null 2>&1; then
               echo '✅ Application stopped gracefully'
               return 0
             fi
@@ -136,30 +136,35 @@ jobs:
             # Send TERM signal for graceful shutdown
             echo 'Sending SIGTERM signal...'
             pkill -TERM -f 'fitz.*jar' 2>/dev/null || true
+            pkill -TERM -f 'current\.jar' 2>/dev/null || true
             
             # Wait for graceful shutdown
-            while [ \$waited -lt \$max_wait ] && pgrep -f 'fitz.*jar' > /dev/null 2>&1; do
+            while [ \$waited -lt \$max_wait ] && pgrep -f 'fitz.*jar\|current\.jar' > /dev/null 2>&1; do
               echo \"Waiting for graceful shutdown... (\${waited}s/\${max_wait}s)\"
               sleep \$wait_interval
               waited=\$((waited + wait_interval))
             done
             
             # Force kill if still running
-            if pgrep -f 'fitz.*jar' > /dev/null 2>&1; then
+            if pgrep -f 'fitz.*jar\|current\.jar' > /dev/null 2>&1; then
               echo 'Graceful shutdown timeout, force killing...'
               pkill -KILL -f 'fitz.*jar' 2>/dev/null || true
-              sleep 2
+              pkill -KILL -f 'current\.jar' 2>/dev/null || true
+              sleep 3
             fi
             
             return 0
           }
           
-          # Function to ensure port 8080 is free
+          # Function to aggressively ensure port 8080 is free
           free_port_8080() {
-            local max_attempts=5
+            local max_attempts=10
             local attempt=1
             
+            echo 'Ensuring port 8080 is completely free...'
+            
             while [ \$attempt -le \$max_attempts ]; do
+              # Check if port is free
               if ! netstat -tuln 2>/dev/null | grep ':8080' > /dev/null; then
                 echo '✅ Port 8080 is free'
                 return 0
@@ -167,21 +172,66 @@ jobs:
               
               echo \"Port 8080 still in use, attempt \$attempt/\$max_attempts\"
               
-              # Find and kill processes using port 8080
-              PORT_PIDS=\$(netstat -tulnp 2>/dev/null | grep ':8080' | awk '{print \$7}' | cut -d'/' -f1 | grep -v '-' | sort -u)
+              # Get detailed port information
+              echo 'Current port 8080 usage:'
+              netstat -tulnp 2>/dev/null | grep ':8080' || echo 'No netstat info available'
+              ss -tulnp 2>/dev/null | grep ':8080' || echo 'No ss info available'
+              
+              # Find and kill ALL processes using port 8080
+              PORT_PIDS=\$(netstat -tulnp 2>/dev/null | grep ':8080' | awk '{print \$7}' | cut -d'/' -f1 | grep -E '^[0-9]+\$' | sort -u)
               
               if [ -n \"\$PORT_PIDS\" ]; then
                 echo \"Killing processes using port 8080: \$PORT_PIDS\"
-                echo \"\$PORT_PIDS\" | xargs -r kill -TERM 2>/dev/null || true
+                for pid in \$PORT_PIDS; do
+                  echo \"Killing PID \$pid\"
+                  kill -TERM \$pid 2>/dev/null || true
+                done
                 sleep 3
-                echo \"\$PORT_PIDS\" | xargs -r kill -KILL 2>/dev/null || true
+                
+                # Force kill if still there
+                for pid in \$PORT_PIDS; do
+                  if kill -0 \$pid 2>/dev/null; then
+                    echo \"Force killing PID \$pid\"
+                    kill -KILL \$pid 2>/dev/null || true
+                  fi
+                done
+                sleep 2
+              fi
+              
+              # Alternative method using lsof if available
+              if command -v lsof >/dev/null 2>&1; then
+                echo 'Using lsof to find port 8080 processes...'
+                LSOF_PIDS=\$(lsof -ti:8080 2>/dev/null || true)
+                if [ -n \"\$LSOF_PIDS\" ]; then
+                  echo \"lsof found PIDs: \$LSOF_PIDS\"
+                  echo \$LSOF_PIDS | xargs -r kill -TERM 2>/dev/null || true
+                  sleep 2
+                  echo \$LSOF_PIDS | xargs -r kill -KILL 2>/dev/null || true
+                fi
+              fi
+              
+              # Alternative method using fuser if available
+              if command -v fuser >/dev/null 2>&1; then
+                echo 'Using fuser to kill port 8080 processes...'
+                fuser -k 8080/tcp 2>/dev/null || true
                 sleep 2
               fi
               
               attempt=\$((attempt + 1))
+              sleep 1
             done
             
-            return 0
+            # Final check
+            if netstat -tuln 2>/dev/null | grep ':8080' > /dev/null; then
+              echo '⚠️  Port 8080 still in use after all attempts'
+              echo 'Final port status:'
+              netstat -tulnp 2>/dev/null | grep ':8080' || true
+              ss -tulnp 2>/dev/null | grep ':8080' || true
+              return 1
+            else
+              echo '✅ Port 8080 successfully freed'
+              return 0
+            fi
           }
           
           # Stop systemd service if it exists
@@ -192,10 +242,17 @@ jobs:
             echo 'ℹ️  fitz-bot service not running'
           fi
           
+          # Kill any Java processes that might be our bot
+          echo 'Killing any existing bot processes...'
+          pkill -f 'FitzcordBot.*\.jar' 2>/dev/null || true
+          pkill -f 'current\.jar' 2>/dev/null || true
+          pkill -f 'java.*fitz' 2>/dev/null || true
+          sleep 3
+          
           # Execute graceful shutdown
           graceful_shutdown
           
-          # Ensure port is free
+          # Aggressively ensure port is free
           free_port_8080
           
           echo 'Stop process completed successfully'
