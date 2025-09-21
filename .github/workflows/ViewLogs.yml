@@ -1,0 +1,274 @@
+name: 📋 View Application Logs
+
+on:
+  # Manual trigger only
+  workflow_dispatch:
+    inputs:
+      lines:
+        description: 'Number of log lines to retrieve (default: 50)'
+        required: false
+        default: '50'
+      follow:
+        description: 'Follow logs in real-time (true/false)'
+        required: false
+        default: 'false'
+        type: choice
+        options:
+          - 'false'
+          - 'true'
+      log_level:
+        description: 'Filter by log level'
+        required: false
+        default: 'ALL'
+        type: choice
+        options:
+          - 'ALL'
+          - 'ERROR'
+          - 'WARN'
+          - 'INFO'
+          - 'DEBUG'
+
+permissions:
+  contents: read
+
+jobs:
+  view-logs:
+    name: 📋 View Fitz-Bot Logs
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+    - name: 🔑 Setup SSH key
+      run: |
+        echo "::group::Setting up SSH key"
+        mkdir -p ~/.ssh
+        chmod 700 ~/.ssh
+        
+        # Write the private key to a file with restricted permissions
+        echo "${{ secrets.PI_SSH_PRIVATE_KEY }}" > ~/.ssh/pi_key
+        chmod 600 ~/.ssh/pi_key
+        
+        # Verify key format
+        if ! ssh-keygen -y -f ~/.ssh/pi_key >/dev/null 2>&1; then
+          echo "❌ Invalid SSH private key format"
+          exit 1
+        fi
+        
+        # Create SSH config for easier connection
+        cat > ~/.ssh/config << EOF
+        Host pi
+            HostName ${{ secrets.PI_HOST }}
+            User ${{ secrets.PI_USER }}
+            IdentityFile ~/.ssh/pi_key
+            Port 22
+            StrictHostKeyChecking no
+            UserKnownHostsFile /dev/null
+            ConnectTimeout 30
+            ServerAliveInterval 60
+            ServerAliveCountMax 3
+        EOF
+        chmod 600 ~/.ssh/config
+        
+        echo "✅ SSH key configured and verified"
+        echo "::endgroup::"
+
+    - name: 🏥 Check application status
+      run: |
+        echo "::group::Application Status Check"
+        ssh pi "
+          echo '=== Fitz-Bot Status ==='
+          
+          if pgrep -f 'current.jar' > /dev/null; then
+            PID=\$(pgrep -f 'current.jar')
+            echo '✅ Fitz-Bot is running (PID: '\$PID')'
+            
+            # Get process info
+            echo ''
+            echo '=== Process Information ==='
+            ps -p \$PID -o pid,ppid,cmd,etime,pcpu,pmem --no-headers
+          else
+            echo '❌ Fitz-Bot is not running'
+          fi
+          
+          echo ''
+          echo '=== Log File Information ==='
+          if [ -f ~/fitz-bot/logs/fitz-bot.log ]; then
+            LOG_SIZE=\$(du -h ~/fitz-bot/logs/fitz-bot.log | cut -f1)
+            LOG_LINES=\$(wc -l < ~/fitz-bot/logs/fitz-bot.log)
+            LOG_MODIFIED=\$(stat -c '%y' ~/fitz-bot/logs/fitz-bot.log)
+            echo \"📁 Log file size: \$LOG_SIZE\"
+            echo \"📄 Total lines: \$LOG_LINES\"
+            echo \"🕒 Last modified: \$LOG_MODIFIED\"
+          else
+            echo '⚠️  Log file not found at ~/fitz-bot/logs/fitz-bot.log'
+            
+            # Check for alternative log locations
+            echo 'Searching for log files...'
+            find ~/fitz-bot -name '*.log' -type f 2>/dev/null | head -5 || echo 'No log files found'
+          fi
+        "
+        echo "::endgroup::"
+
+    - name: 📋 Retrieve logs
+      run: |
+        echo "::group::Retrieving Application Logs"
+        LINES="${{ github.event.inputs.lines }}"
+        LOG_LEVEL="${{ github.event.inputs.log_level }}"
+        FOLLOW="${{ github.event.inputs.follow }}"
+        
+        echo "📋 Retrieving last $LINES lines (Level: $LOG_LEVEL)"
+        
+        ssh pi "
+          cd ~/fitz-bot
+          
+          if [ ! -f logs/fitz-bot.log ]; then
+            echo '❌ Log file not found: ~/fitz-bot/logs/fitz-bot.log'
+            echo ''
+            echo 'Available files in logs directory:'
+            ls -la logs/ 2>/dev/null || echo 'Logs directory does not exist'
+            exit 1
+          fi
+          
+          echo '==================== FITZ-BOT LOGS ===================='
+          echo \"📅 Retrieved at: \$(date)\"
+          echo \"📊 Showing last $LINES lines\"
+          if [ \"$LOG_LEVEL\" != \"ALL\" ]; then
+            echo \"🔍 Filtered for: $LOG_LEVEL level\"
+          fi
+          echo '========================================================'
+          echo ''
+          
+          if [ \"$LOG_LEVEL\" = \"ALL\" ]; then
+            # Show all logs
+            tail -n $LINES logs/fitz-bot.log
+          else
+            # Filter by log level
+            case \"$LOG_LEVEL\" in
+              \"ERROR\")
+                tail -n 1000 logs/fitz-bot.log | grep -i 'ERROR' | tail -n $LINES || echo 'No ERROR logs found in last 1000 lines'
+                ;;
+              \"WARN\")
+                tail -n 1000 logs/fitz-bot.log | grep -i 'WARN' | tail -n $LINES || echo 'No WARN logs found in last 1000 lines'
+                ;;
+              \"INFO\")
+                tail -n 1000 logs/fitz-bot.log | grep -i 'INFO' | tail -n $LINES || echo 'No INFO logs found in last 1000 lines'
+                ;;
+              \"DEBUG\")
+                tail -n 1000 logs/fitz-bot.log | grep -i 'DEBUG' | tail -n $LINES || echo 'No DEBUG logs found in last 1000 lines'
+                ;;
+            esac
+          fi
+          
+          echo ''
+          echo '==================== END OF LOGS ===================='
+        "
+        echo "::endgroup::"
+
+    - name: 📊 Log analysis
+      if: github.event.inputs.log_level == 'ALL'
+      run: |
+        echo "::group::Log Analysis"
+        ssh pi "
+          cd ~/fitz-bot
+          
+          if [ -f logs/fitz-bot.log ]; then
+            echo '📊 Log Analysis Summary:'
+            echo ''
+            
+            # Count different log levels
+            echo '=== Log Level Distribution (last 1000 lines) ==='
+            tail -n 1000 logs/fitz-bot.log | grep -o -E '(ERROR|WARN|INFO|DEBUG)' | sort | uniq -c | sort -nr || echo 'No standard log levels found'
+            
+            echo ''
+            echo '=== Recent Errors (last 10) ==='
+            tail -n 1000 logs/fitz-bot.log | grep -i 'error' | tail -n 10 || echo 'No recent errors found'
+            
+            echo ''
+            echo '=== Recent Warnings (last 5) ==='
+            tail -n 1000 logs/fitz-bot.log | grep -i 'warn' | tail -n 5 || echo 'No recent warnings found'
+            
+            echo ''
+            echo '=== Application Startup Messages ==='
+            grep -E '(Started|Application|Fitz-Bot)' logs/fitz-bot.log | tail -n 5 || echo 'No startup messages found'
+          fi
+        "
+        echo "::endgroup::"
+
+    - name: 📡 Follow logs (if enabled)
+      if: github.event.inputs.follow == 'true'
+      timeout-minutes: 5
+      run: |
+        echo "::group::Following Live Logs"
+        echo "📡 Following logs for 5 minutes (or until workflow is cancelled)..."
+        echo "Press Ctrl+C to stop following logs"
+        echo ""
+        
+        ssh pi "
+          cd ~/fitz-bot
+          
+          if [ -f logs/fitz-bot.log ]; then
+            echo 'Following live logs...'
+            timeout 300 tail -f logs/fitz-bot.log || echo 'Timeout reached or log following ended'
+          else
+            echo 'Log file not found'
+          fi
+        " || echo "Log following ended"
+        echo "::endgroup::"
+
+    - name: 💾 Download logs (last 1000 lines)
+      run: |
+        echo "::group::Downloading Log Excerpt"
+        
+        # Create local logs directory
+        mkdir -p ./downloaded-logs
+        
+        # Download recent logs
+        ssh pi "
+          cd ~/fitz-bot
+          if [ -f logs/fitz-bot.log ]; then
+            tail -n 1000 logs/fitz-bot.log > /tmp/fitz-bot-recent.log
+            echo 'Created log excerpt with last 1000 lines'
+          fi
+        "
+        
+        # Copy the log excerpt to GitHub Actions
+        scp -F ~/.ssh/config pi:/tmp/fitz-bot-recent.log ./downloaded-logs/fitz-bot-recent.log
+        
+        echo "📁 Log excerpt downloaded to: ./downloaded-logs/fitz-bot-recent.log"
+        echo "📊 Size: $(du -h ./downloaded-logs/fitz-bot-recent.log | cut -f1)"
+        echo "::endgroup::"
+
+    - name: 📤 Upload logs as artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: fitz-bot-logs-${{ github.run_number }}
+        path: ./downloaded-logs/fitz-bot-recent.log
+        retention-days: 7
+
+    - name: 🧹 Cleanup SSH key
+      if: always()
+      run: |
+        echo "::group::Cleaning up SSH key"
+        rm -f ~/.ssh/pi_key
+        rm -f ~/.ssh/config
+        ssh pi "rm -f /tmp/fitz-bot-recent.log" 2>/dev/null || true
+        echo "✅ SSH key and temporary files cleaned up"
+        echo "::endgroup::"
+
+    - name: 📋 Summary
+      if: always()
+      run: |
+        echo "## 📋 Log Retrieval Summary"
+        echo "**Timestamp:** $(date -u '+%Y-%m-%d %H:%M:%S UTC')"
+        echo "**Lines Retrieved:** ${{ github.event.inputs.lines }}"
+        echo "**Log Level Filter:** ${{ github.event.inputs.log_level }}"
+        echo "**Follow Mode:** ${{ github.event.inputs.follow }}"
+        echo ""
+        echo "### 📁 Artifacts"
+        echo "- Downloaded log excerpt (last 1000 lines) available as workflow artifact"
+        echo "- Artifact retention: 7 days"
+        echo ""
+        echo "### 🔗 Quick Actions"
+        echo "- To view logs again: Re-run this workflow"
+        echo "- To restart bot: Use the deployment workflow"
+        echo "- To check status: SSH to Pi and run \`pgrep -f current.jar\`"
