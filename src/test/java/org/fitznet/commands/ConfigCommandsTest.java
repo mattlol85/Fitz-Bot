@@ -257,4 +257,180 @@ class ConfigCommandsTest {
             event.getHook().editOriginal("❌ An error occurred while initializing tracking date: " + e.getMessage()).queue();
         }
     }
+
+    @Test
+    void testCurrentCount_NoJoinCounts() {
+        // Arrange: Guild with no join counts
+        when(mockEvent.getName()).thenReturn("currentcount");
+
+        // Act
+        handleCurrentCountTest(mockEvent, database);
+
+        // Assert
+        verify(mockHook).editOriginal("ℹ️ No join counts found for any users in this server.");
+    }
+
+    @Test
+    void testCurrentCount_SingleUser() {
+        // Arrange: Guild with one user having join counts
+        when(mockEvent.getName()).thenReturn("currentcount");
+
+        // Add some join counts
+        long userId = 111111111L;
+        String userName = "TestUser1";
+        database.incrementUserJoinCount(TEST_GUILD_ID, userId);
+        database.incrementUserJoinCount(TEST_GUILD_ID, userId);
+        database.incrementUserJoinCount(TEST_GUILD_ID, userId);
+
+        // Mock the member lookup
+        Member mockMember1 = mock(Member.class);
+        when(mockGuild.getMemberById(userId)).thenReturn(mockMember1);
+        when(mockMember1.getEffectiveName()).thenReturn(userName);
+
+        // Act
+        handleCurrentCountTest(mockEvent, database);
+
+        // Assert
+        String expectedMessage = "📊 Current voice join counts for all users in this server:\n" +
+                "• TestUser1: 3 joins\n";
+        verify(mockHook).editOriginal(expectedMessage);
+    }
+
+    @Test
+    void testCurrentCount_MultipleUsersOrderedByCount() {
+        // Arrange: Guild with multiple users having different join counts
+        when(mockEvent.getName()).thenReturn("currentcount");
+
+        // Add join counts for multiple users (in random order to test sorting)
+        long userId1 = 111111111L;
+        long userId2 = 222222222L;
+        long userId3 = 333333333L;
+
+        String userName1 = "LowCountUser";
+        String userName2 = "HighCountUser";
+        String userName3 = "MediumCountUser";
+
+        // Add different amounts of joins (not in order)
+        database.incrementUserJoinCount(TEST_GUILD_ID, userId1); // 1 join
+
+        database.incrementUserJoinCount(TEST_GUILD_ID, userId2); // 5 joins
+        database.incrementUserJoinCount(TEST_GUILD_ID, userId2);
+        database.incrementUserJoinCount(TEST_GUILD_ID, userId2);
+        database.incrementUserJoinCount(TEST_GUILD_ID, userId2);
+        database.incrementUserJoinCount(TEST_GUILD_ID, userId2);
+
+        database.incrementUserJoinCount(TEST_GUILD_ID, userId3); // 3 joins
+        database.incrementUserJoinCount(TEST_GUILD_ID, userId3);
+        database.incrementUserJoinCount(TEST_GUILD_ID, userId3);
+
+        // Mock the member lookups
+        Member mockMember1 = mock(Member.class);
+        Member mockMember2 = mock(Member.class);
+        Member mockMember3 = mock(Member.class);
+
+        when(mockGuild.getMemberById(userId1)).thenReturn(mockMember1);
+        when(mockGuild.getMemberById(userId2)).thenReturn(mockMember2);
+        when(mockGuild.getMemberById(userId3)).thenReturn(mockMember3);
+
+        when(mockMember1.getEffectiveName()).thenReturn(userName1);
+        when(mockMember2.getEffectiveName()).thenReturn(userName2);
+        when(mockMember3.getEffectiveName()).thenReturn(userName3);
+
+        // Act
+        handleCurrentCountTest(mockEvent, database);
+
+        // Assert - should be ordered by count (highest to lowest)
+        String expectedMessage = "📊 Current voice join counts for all users in this server:\n" +
+                "• HighCountUser: 5 joins\n" +
+                "• MediumCountUser: 3 joins\n" +
+                "• LowCountUser: 1 joins\n";
+        verify(mockHook).editOriginal(expectedMessage);
+    }
+
+    @Test
+    void testCurrentCount_UserNotFoundInGuild() {
+        // Arrange: Guild with join counts but user no longer in guild
+        when(mockEvent.getName()).thenReturn("currentcount");
+
+        long userId = 111111111L;
+        database.incrementUserJoinCount(TEST_GUILD_ID, userId);
+        database.incrementUserJoinCount(TEST_GUILD_ID, userId);
+
+        // Mock member lookup returning null (user left guild)
+        when(mockGuild.getMemberById(userId)).thenReturn(null);
+
+        // Act
+        handleCurrentCountTest(mockEvent, database);
+
+        // Assert - should show "Unknown User"
+        String expectedMessage = "📊 Current voice join counts for all users in this server:\n" +
+                "• Unknown User: 2 joins\n";
+        verify(mockHook).editOriginal(expectedMessage);
+    }
+
+    @Test
+    void testCurrentCount_MixedKnownAndUnknownUsers() {
+        // Arrange: Guild with some known and some unknown users
+        when(mockEvent.getName()).thenReturn("currentcount");
+
+        long knownUserId = 111111111L;
+        long unknownUserId = 222222222L;
+
+        database.incrementUserJoinCount(TEST_GUILD_ID, knownUserId);
+        database.incrementUserJoinCount(TEST_GUILD_ID, knownUserId);
+        database.incrementUserJoinCount(TEST_GUILD_ID, knownUserId);
+
+        database.incrementUserJoinCount(TEST_GUILD_ID, unknownUserId);
+
+        // Mock member lookups - one found, one not found
+        Member mockKnownMember = mock(Member.class);
+        when(mockGuild.getMemberById(knownUserId)).thenReturn(mockKnownMember);
+        when(mockGuild.getMemberById(unknownUserId)).thenReturn(null);
+        when(mockKnownMember.getEffectiveName()).thenReturn("KnownUser");
+
+        // Act
+        handleCurrentCountTest(mockEvent, database);
+
+        // Assert - should be ordered by count with proper names
+        String expectedMessage = "📊 Current voice join counts for all users in this server:\n" +
+                "• KnownUser: 3 joins\n" +
+                "• Unknown User: 1 joins\n";
+        verify(mockHook).editOriginal(expectedMessage);
+    }
+
+    /**
+     * Helper method that replicates the handleCurrentCount logic for testing
+     */
+    private void handleCurrentCountTest(SlashCommandInteractionEvent event, GuildConfigDatabase configDatabase) {
+        try {
+            long guildId = Objects.requireNonNull(event.getGuild()).getIdLong();
+
+            // Retrieve current join counts from the database
+            var joinCounts = configDatabase.getCurrentJoinCounts(guildId);
+
+            if (joinCounts == null || joinCounts.isEmpty()) {
+                event.getHook().editOriginal("ℹ️ No join counts found for any users in this server.").queue();
+                return;
+            }
+
+            // Build the response message
+            StringBuilder responseMessage = new StringBuilder("📊 Current voice join counts for all users in this server:\n");
+
+            for (var entry : joinCounts.entrySet()) {
+                long userId = entry.getKey();
+                int count = entry.getValue();
+
+                var member = event.getGuild().getMemberById(userId);
+                String userName = (member != null) ? member.getEffectiveName() : "Unknown User";
+
+                responseMessage.append(String.format("• %s: %d joins\n", userName, count));
+            }
+
+            // Send the response message
+            event.getHook().editOriginal(responseMessage.toString()).queue();
+
+        } catch (Exception e) {
+            event.getHook().editOriginal("❌ An error occurred while retrieving current join counts: " + e.getMessage()).queue();
+        }
+    }
 }

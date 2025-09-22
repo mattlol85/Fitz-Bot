@@ -36,7 +36,8 @@ public class ConfigCommands extends ListenerAdapter {
                 .addOption(OptionType.CHANNEL, "channel", "The text channel to use for bot messages", true),
             Commands.slash("getbotchannel", "Show the current bot channel configuration"),
             Commands.slash("resetjoincounts", "Reset all voice join counts for this server (Admin only)"),
-            Commands.slash("initializetracking", "Initialize tracking date for this server (Admin only)")
+            Commands.slash("initializetracking", "Initialize tracking date for this server (Admin only)"),
+            Commands.slash("currentcount", "Show current voice join counts for all users in this server")
         };
     }
 
@@ -63,6 +64,7 @@ public class ConfigCommands extends ListenerAdapter {
                 case "getbotchannel" -> handleGetBotChannel(event);
                 case "resetjoincounts" -> handleResetJoinCounts(event);
                 case "initializetracking" -> handleInitializeTracking(event);
+                case "currentcount" -> handleCurrentCount(event);
                 default -> {
                     log.warn("Unknown command: {}", event.getName());
                     event.getHook().editOriginal("❌ Unknown command").queue();
@@ -225,6 +227,43 @@ public class ConfigCommands extends ListenerAdapter {
         } catch (Exception e) {
             log.error("Error in handleInitializeTracking", e);
             event.getHook().editOriginal("❌ An error occurred while initializing tracking date: " + e.getMessage()).queue();
+        }
+    }
+
+    private void handleCurrentCount(SlashCommandInteractionEvent event) {
+        log.info("Processing currentcount command for guild: {}", event.getGuild().getName());
+
+        try {
+            long guildId = event.getGuild().getIdLong();
+
+            // Retrieve current join counts from the database
+            var joinCounts = configDatabase.getCurrentJoinCounts(guildId);
+
+            if (joinCounts == null || joinCounts.isEmpty()) {
+                log.info("No join counts found for guild {}", guildId);
+                event.getHook().editOriginal("ℹ️ No join counts found for any users in this server.").queue();
+                return;
+            }
+
+            // Build the response message
+            StringBuilder responseMessage = new StringBuilder("📊 Current voice join counts for all users in this server:\n");
+
+            for (var entry : joinCounts.entrySet()) {
+                long userId = entry.getKey();
+                int count = entry.getValue();
+
+                var member = event.getGuild().getMemberById(userId);
+                String userName = (member != null) ? member.getEffectiveName() : "Unknown User";
+
+                responseMessage.append(String.format("• %s: %d joins\n", userName, count));
+            }
+
+            // Send the response message
+            event.getHook().editOriginal(responseMessage.toString()).queue();
+
+        } catch (Exception e) {
+            log.error("Error in handleCurrentCount", e);
+            event.getHook().editOriginal("❌ An error occurred while retrieving current join counts: " + e.getMessage()).queue();
         }
     }
 }
