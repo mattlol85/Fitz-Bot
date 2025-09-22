@@ -291,4 +291,27 @@ public class GuildConfigDatabase {
             log.info("Initialized tracking date for guild {}", guildId);
         }
     }
+
+    /**
+     * Gets all current join counts for users in a guild, sorted by count (highest to lowest).
+     *
+     * @param guildId the Discord guild ID
+     * @return a LinkedHashMap of user IDs to their join counts, ordered by count descending
+     */
+    public java.util.LinkedHashMap<Long, Integer> getCurrentJoinCounts(long guildId) {
+        GuildConfig config = guildConfigs.get(guildId);
+        if (config == null || config.getUserJoinCounts().isEmpty()) {
+            return new java.util.LinkedHashMap<>();
+        }
+
+        // Sort join counts by value (descending) and return as LinkedHashMap to preserve order
+        return config.getUserJoinCounts().entrySet().stream()
+                .sorted(java.util.Map.Entry.<Long, Long>comparingByValue().reversed())
+                .collect(java.util.stream.Collectors.toMap(
+                        java.util.Map.Entry::getKey,
+                        entry -> entry.getValue().intValue(),
+                        (e1, e2) -> e1,
+                        java.util.LinkedHashMap::new
+                ));
+    }
 }
