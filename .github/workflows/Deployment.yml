@@ -184,7 +184,14 @@ jobs:
             echo "logging.file.name=logs/fitz-bot.log" >> config/application.properties
             echo "✅ Created default configuration"
           else
-            echo "ℹ️  Configuration file already exists"
+            echo "ℹ️  Configuration file already exists - updating log path"
+            # Update or add the logging.file.name property
+            if grep -q "logging.file.name=" config/application.properties; then
+              sed -i "s|logging.file.name=.*|logging.file.name=logs/fitz-bot.log|" config/application.properties
+            else
+              echo "logging.file.name=logs/fitz-bot.log" >> config/application.properties
+            fi
+            echo "✅ Updated log file path to logs/fitz-bot.log"
           fi
           
           # Set version info

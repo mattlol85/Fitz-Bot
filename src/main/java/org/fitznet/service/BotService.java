@@ -8,7 +8,10 @@ import net.dv8tion.jda.api.OnlineStatus;
 import net.dv8tion.jda.api.entities.Activity;
 import org.fitznet.commands.ConfigCommands;
 import org.fitznet.listener.LoginListener;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.boot.SpringApplication;
+import org.springframework.context.ApplicationContext;
 import org.springframework.stereotype.Service;
 
 /**
@@ -20,6 +23,9 @@ public class BotService {
 
     @Value("${discord.bot.token}")
     private String token;
+
+    @Autowired
+    private ApplicationContext applicationContext;
 
     /**
      * -- GETTER --
@@ -91,18 +97,34 @@ public class BotService {
     }
 
     /**
-     * Stops the Discord bot.
+     * Stops the Discord bot and shuts down the entire application.
      *
      * @return shutdown result message
      */
     public String stopBot() {
         if (jda != null && jda.getStatus() != JDA.Status.SHUTDOWN) {
+            log.info("Shutting down Discord bot...");
             jda.shutdown();
             jda = null;
             log.info("Bot has been shut down");
-            return "Bot is shutting down.";
         }
-        return "Bot is already shut down.";
+
+        log.info("Shutting down Spring Boot application...");
+
+        // Shutdown the entire Spring Boot application
+        new Thread(() -> {
+            try {
+                Thread.sleep(1000); // Give time for the response to be sent
+                SpringApplication.exit(applicationContext, () -> 0);
+                System.exit(0);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                log.error("Interrupted during application shutdown", e);
+                System.exit(1);
+            }
+        }).start();
+
+        return "Bot and application are shutting down completely.";
     }
 
     /**

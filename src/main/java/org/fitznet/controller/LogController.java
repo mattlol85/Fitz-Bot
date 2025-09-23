@@ -1,6 +1,7 @@
 package org.fitznet.controller;
 
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Controller;
 import org.springframework.ui.Model;
 import org.springframework.web.bind.annotation.*;
@@ -18,7 +19,8 @@ import java.util.stream.Collectors;
 @RequestMapping("/logs")
 public class LogController {
 
-    private static final String LOG_FILE_PATH = "logs/application.log";
+    @Value("${logging.file.name:logs/application.log}")
+    private String logFilePath;
 
     @GetMapping
     public String logsPage(Model model) {
@@ -30,9 +32,9 @@ public class LogController {
     @ResponseBody
     public LogResponse getTailLogs(@RequestParam(defaultValue = "100") int lines) {
         try {
-            Path logPath = Paths.get(LOG_FILE_PATH);
+            Path logPath = Paths.get(logFilePath);
             if (!Files.exists(logPath)) {
-                return new LogResponse(Collections.singletonList("Log file not found: " + LOG_FILE_PATH), 0);
+                return new LogResponse(Collections.singletonList("Log file not found: " + logFilePath), 0);
             }
 
             List<String> allLines = Files.readAllLines(logPath);
@@ -55,9 +57,9 @@ public class LogController {
     public LogResponse searchLogs(@RequestParam String query,
                                  @RequestParam(defaultValue = "100") int maxResults) {
         try {
-            Path logPath = Paths.get(LOG_FILE_PATH);
+            Path logPath = Paths.get(logFilePath);
             if (!Files.exists(logPath)) {
-                return new LogResponse(Collections.singletonList("Log file not found: " + LOG_FILE_PATH), 0);
+                return new LogResponse(Collections.singletonList("Log file not found: " + logFilePath), 0);
             }
 
             List<String> matchingLines = Files.lines(logPath)
@@ -77,9 +79,9 @@ public class LogController {
     public LogResponse getLogsByLevel(@PathVariable String level,
                                      @RequestParam(defaultValue = "100") int maxResults) {
         try {
-            Path logPath = Paths.get(LOG_FILE_PATH);
+            Path logPath = Paths.get(logFilePath);
             if (!Files.exists(logPath)) {
-                return new LogResponse(Collections.singletonList("Log file not found: " + LOG_FILE_PATH), 0);
+                return new LogResponse(Collections.singletonList("Log file not found: " + logFilePath), 0);
             }
 
             String levelPattern = level.toUpperCase();
