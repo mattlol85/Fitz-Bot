@@ -32,12 +32,12 @@ public class ConfigCommands extends ListenerAdapter {
      */
     public static SlashCommandData[] getCommands() {
         return new SlashCommandData[]{
-            Commands.slash("setbotchannel", "Set the channel for bot milestone messages")
-                .addOption(OptionType.CHANNEL, "channel", "The text channel to use for bot messages", true),
-            Commands.slash("getbotchannel", "Show the current bot channel configuration"),
-            Commands.slash("resetjoincounts", "Reset all voice join counts for this server (Admin only)"),
-            Commands.slash("initializetracking", "Initialize tracking date for this server (Admin only)"),
-            Commands.slash("currentcount", "Show current voice join counts for all users in this server")
+                Commands.slash("setbotchannel", "Set the channel for bot milestone messages")
+                        .addOption(OptionType.CHANNEL, "channel", "The text channel to use for bot messages", true),
+                Commands.slash("getbotchannel", "Show the current bot channel configuration"),
+                Commands.slash("resetjoincounts", "Reset all voice join counts for this server (Admin only)"),
+                Commands.slash("initializetracking", "Initialize tracking date for this server (Admin only)"),
+                Commands.slash("currentcount", "Show current voice join counts for all users in this server")
         };
     }
 
@@ -108,13 +108,12 @@ public class ConfigCommands extends ListenerAdapter {
             var channel = channelOption.getAsChannel();
             log.info("Channel selected: {} (type: {})", channel.getName(), channel.getType());
 
-            if (!(channel instanceof TextChannel)) {
+            if (!(channel instanceof TextChannel textChannel)) {
                 log.warn("Non-text channel selected: {} (type: {})", channel.getName(), channel.getType());
                 event.getHook().editOriginal("❌ Please select a text channel, not a voice channel or category!").queue();
                 return;
             }
 
-            TextChannel textChannel = (TextChannel) channel;
             long guildId = event.getGuild().getIdLong();
             long channelId = textChannel.getIdLong();
 
@@ -127,7 +126,7 @@ public class ConfigCommands extends ListenerAdapter {
 
             // Send success response
             event.getHook().editOriginal("✅ Bot channel set to " + textChannel.getAsMention() +
-                       "\nMilestone messages will now be sent here!").queue();
+                    "\nMilestone messages will now be sent here!").queue();
 
         } catch (Exception e) {
             log.error("Error in handleSetBotChannel", e);
@@ -245,25 +244,98 @@ public class ConfigCommands extends ListenerAdapter {
                 return;
             }
 
-            // Build the response message
-            StringBuilder responseMessage = new StringBuilder("📊 Current voice join counts for all users in this server:\n");
-
-            for (var entry : joinCounts.entrySet()) {
-                long userId = entry.getKey();
-                int count = entry.getValue();
-
-                var member = event.getGuild().getMemberById(userId);
-                String userName = (member != null) ? member.getEffectiveName() : "Unknown User";
-
-                responseMessage.append(String.format("• %s: %d joins\n", userName, count));
-            }
-
-            // Send the response message
-            event.getHook().editOriginal(responseMessage.toString()).queue();
+            buildCurrentCountResponse(event, joinCounts);
 
         } catch (Exception e) {
             log.error("Error in handleCurrentCount", e);
             event.getHook().editOriginal("❌ An error occurred while retrieving current join counts: " + e.getMessage()).queue();
+        }
+    }
+
+    private void buildCurrentCountResponse(SlashCommandInteractionEvent event, java.util.LinkedHashMap<Long, Integer> joinCounts) {
+        StringBuilder responseMessage = new StringBuilder("📊 Current voice join counts for all users in this server:\n");
+
+        // Counter for tracking async operations
+        final int[] pendingUsers = {0};
+        final boolean[] responseSent = {false};
+
+        // First pass: count how many async operations we'll need
+        int asyncOperationsNeeded = 0;
+        for (var entry : joinCounts.entrySet()) {
+            long userId = entry.getKey();
+            var member = event.getGuild().getMemberById(userId);
+            if (member == null) {
+                asyncOperationsNeeded++;
+            }
+        }
+
+        pendingUsers[0] = asyncOperationsNeeded;
+        log.debug("Building response for {} users, {} async operations needed", joinCounts.size(), asyncOperationsNeeded);
+
+        // Process each user
+        for (var entry : joinCounts.entrySet()) {
+            long userId = entry.getKey();
+            int count = entry.getValue();
+
+            // First try to get member (for current server members)
+            var member = event.getGuild().getMemberById(userId);
+            if (member != null) {
+                responseMessage.append(String.format("• %s: %d joins\n", member.getEffectiveName(), count));
+                log.debug("Added current member: {} with {} joins", member.getEffectiveName(), count);
+            } else {
+                // Add placeholder for users not currently in server
+                String placeholder = String.format("• User ID %d: %d joins\n", userId, count);
+                responseMessage.append(placeholder);
+
+                // Try to retrieve user from Discord API
+                event.getJDA().retrieveUserById(userId).queue(
+                        user -> {
+                            log.debug("Successfully retrieved user: {} for ID {}", user.getName(), userId);
+                            synchronized (responseMessage) {
+                                if (!responseSent[0]) {
+                                    // Replace placeholder with actual username
+                                    String userLine = String.format("• %s: %d joins\n", user.getName(), count);
+                                    String content = responseMessage.toString();
+                                    responseMessage.setLength(0);
+                                    responseMessage.append(content.replace(placeholder, userLine));
+
+                                    pendingUsers[0]--;
+                                    log.debug("Async user retrieved, {} operations remaining", pendingUsers[0]);
+
+                                    // Send response if all async operations are done
+                                    if (pendingUsers[0] == 0) {
+                                        responseSent[0] = true;
+                                        log.debug("All async operations complete, sending response");
+                                        event.getHook().editOriginal(responseMessage.toString()).queue();
+                                    }
+                                }
+                            }
+                        },
+                        failure -> {
+                            log.warn("Failed to retrieve user info for {}: {}", userId, failure.getMessage());
+                            synchronized (responseMessage) {
+                                if (!responseSent[0]) {
+                                    pendingUsers[0]--;
+                                    log.debug("Async user retrieval failed, {} operations remaining", pendingUsers[0]);
+
+                                    // Send response if all async operations are done (even failed ones)
+                                    if (pendingUsers[0] == 0) {
+                                        responseSent[0] = true;
+                                        log.debug("All async operations complete (with failures), sending response");
+                                        event.getHook().editOriginal(responseMessage.toString()).queue();
+                                    }
+                                }
+                            }
+                        }
+                );
+            }
+        }
+
+        // If no async operations are needed, send response immediately
+        if (pendingUsers[0] == 0 && !responseSent[0]) {
+            responseSent[0] = true;
+            log.debug("No async operations needed, sending response immediately");
+            event.getHook().editOriginal(responseMessage.toString()).queue();
         }
     }
 }
