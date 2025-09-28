@@ -41,7 +41,7 @@ public class EmbedUtil {
         String milestoneText = String.format("You've joined FITZ-NET **%d time(s)**!", milestoneCount);
         if (trackingStartDate != null) {
             String formattedDate = trackingStartDate.format(DATE_FORMATTER);
-            milestoneText += String.format("\n*(Tracking started %s)*", formattedDate);
+            milestoneText += String.format("\n*(As of %s)*", formattedDate);
         }
 
         embed.addField("Milestone Achieved", milestoneText, false);
