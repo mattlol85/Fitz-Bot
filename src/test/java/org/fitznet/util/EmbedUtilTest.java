@@ -75,7 +75,7 @@ class EmbedUtilTest {
         MessageEmbed.Field milestoneField = embed.getFields().get(0);
         assertEquals("Milestone Achieved", milestoneField.getName());
 
-        String expectedValue = "You've joined FITZ-NET **10 time(s)**!\n*(Tracking started Jan 15, 2024)*";
+        String expectedValue = "You've joined FITZ-NET **10 time(s)**!\n*(As of Jan 15, 2024)*";
         assertEquals(expectedValue, milestoneField.getValue());
         assertFalse(milestoneField.isInline());
     }
