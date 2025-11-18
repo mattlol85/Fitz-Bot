@@ -43,8 +43,14 @@ public class ConfigCommands extends ListenerAdapter {
 
     @Override
     public void onSlashCommandInteraction(SlashCommandInteractionEvent event) {
+        // Only handle commands that belong to this handler
+        String commandName = event.getName();
+        if (!isConfigCommand(commandName)) {
+            return; // Let other handlers process this command
+        }
+
         log.info("Received slash command: {} from user: {} in guild: {}",
-                event.getName(),
+                commandName,
                 event.getUser().getName(),
                 event.getGuild() != null ? event.getGuild().getName() : "DM");
 
@@ -59,19 +65,19 @@ public class ConfigCommands extends ListenerAdapter {
                 return;
             }
 
-            switch (event.getName()) {
+            switch (commandName) {
                 case "setbotchannel" -> handleSetBotChannel(event);
                 case "getbotchannel" -> handleGetBotChannel(event);
                 case "resetjoincounts" -> handleResetJoinCounts(event);
                 case "initializetracking" -> handleInitializeTracking(event);
                 case "currentcount" -> handleCurrentCount(event);
                 default -> {
-                    log.warn("Unknown command: {}", event.getName());
+                    log.warn("Unknown config command: {}", commandName);
                     event.getHook().editOriginal("❌ Unknown command").queue();
                 }
             }
         } catch (Exception e) {
-            log.error("Error in onSlashCommandInteraction for command: {}", event.getName(), e);
+            log.error("Error in onSlashCommandInteraction for command: {}", commandName, e);
             try {
                 if (event.isAcknowledged()) {
                     event.getHook().editOriginal("❌ An error occurred while processing your command. Please try again.").queue();
@@ -83,6 +89,17 @@ public class ConfigCommands extends ListenerAdapter {
                 log.error("Failed to send error response", replyError);
             }
         }
+    }
+
+    /**
+     * Checks if the command name belongs to this handler.
+     */
+    private boolean isConfigCommand(String commandName) {
+        return commandName.equals("setbotchannel") ||
+               commandName.equals("getbotchannel") ||
+               commandName.equals("resetjoincounts") ||
+               commandName.equals("initializetracking") ||
+               commandName.equals("currentcount");
     }
 
     private void handleSetBotChannel(SlashCommandInteractionEvent event) {

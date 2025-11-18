@@ -7,6 +7,7 @@ import net.dv8tion.jda.api.JDABuilder;
 import net.dv8tion.jda.api.OnlineStatus;
 import net.dv8tion.jda.api.entities.Activity;
 import org.fitznet.commands.ConfigCommands;
+import org.fitznet.commands.JoenetCommands;
 import org.fitznet.listener.LoginListener;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
@@ -26,6 +27,9 @@ public class BotService {
 
     @Autowired
     private ApplicationContext applicationContext;
+
+    @Autowired
+    private JoenetCommands joenetCommands;
 
     /**
      * -- GETTER --
@@ -56,6 +60,7 @@ public class BotService {
             // Add event listeners
             jda.addEventListener(new LoginListener());
             jda.addEventListener(new ConfigCommands());
+            jda.addEventListener(joenetCommands);
 
             // Small delay to ensure guild cache is fully populated
             Thread.sleep(2000);
@@ -65,9 +70,13 @@ public class BotService {
                 log.warn("No guilds found after startup - guild cache may not be ready yet");
             }
 
+            // Combine commands from both handlers
+            var allCommands = new java.util.ArrayList<>(java.util.Arrays.asList(ConfigCommands.getCommands()));
+            allCommands.addAll(java.util.Arrays.asList(JoenetCommands.getCommands()));
+
             for (var guild : jda.getGuilds()) {
                 guild.updateCommands()
-                    .addCommands(ConfigCommands.getCommands())
+                    .addCommands(allCommands)
                     .queue(
                         success -> log.info("Commands registered for guild: {} ({})", guild.getName(), guild.getId()),
                         error -> log.error("Failed to register commands for guild {}: {}", guild.getName(), error.getMessage())
@@ -75,7 +84,7 @@ public class BotService {
             }
 
             // Also register globally for new servers (backup)
-            jda.updateCommands().addCommands(ConfigCommands.getCommands()).queue(
+            jda.updateCommands().addCommands(allCommands).queue(
                 success -> log.info("Global commands registered successfully"),
                 error -> log.error("Failed to register global commands: {}", error.getMessage())
             );
@@ -137,10 +146,14 @@ public class BotService {
             return "Bot is not running!";
         }
 
+        // Combine commands from both handlers
+        var allCommands = new java.util.ArrayList<>(java.util.Arrays.asList(ConfigCommands.getCommands()));
+        allCommands.addAll(java.util.Arrays.asList(JoenetCommands.getCommands()));
+
         int guildCount = 0;
         for (var guild : jda.getGuilds()) {
             guild.updateCommands()
-                .addCommands(ConfigCommands.getCommands())
+                .addCommands(allCommands)
                 .queue(
                     success -> log.info("Force updated commands for guild: {}", guild.getName()),
                     error -> log.error("Failed to force update commands for guild {}: {}", guild.getName(), error.getMessage())
@@ -163,8 +176,17 @@ public class BotService {
         }
 
         try {
-            jda.getGuildById(guildId).updateCommands()
-                .addCommands(ConfigCommands.getCommands())
+            // Combine commands from both handlers
+            var allCommands = new java.util.ArrayList<>(java.util.Arrays.asList(ConfigCommands.getCommands()));
+            allCommands.addAll(java.util.Arrays.asList(joenetCommands.getCommands()));
+
+            var guild = jda.getGuildById(guildId);
+            if (guild == null) {
+                return "Guild not found with ID: " + guildId;
+            }
+
+            guild.updateCommands()
+                .addCommands(allCommands)
                 .queue(
                     success -> log.info("Guild commands registered successfully for guild {}", guildId),
                     error -> log.error("Failed to register guild commands for {}: {}", guildId, error.getMessage())
