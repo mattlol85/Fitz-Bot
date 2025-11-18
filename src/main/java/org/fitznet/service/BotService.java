@@ -7,6 +7,7 @@ import net.dv8tion.jda.api.JDABuilder;
 import net.dv8tion.jda.api.OnlineStatus;
 import net.dv8tion.jda.api.entities.Activity;
 import org.fitznet.commands.ConfigCommands;
+import org.fitznet.commands.JoenetCommands;
 import org.fitznet.listener.LoginListener;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
@@ -26,6 +27,9 @@ public class BotService {
 
     @Autowired
     private ApplicationContext applicationContext;
+
+    @Autowired
+    private JoenetCommands joenetCommands;
 
     /**
      * -- GETTER --
@@ -137,10 +141,14 @@ public class BotService {
             return "Bot is not running!";
         }
 
+        // Combine commands from both handlers
+        var allCommands = new java.util.ArrayList<>(java.util.Arrays.asList(ConfigCommands.getCommands()));
+        allCommands.addAll(java.util.Arrays.asList(JoenetCommands.getCommands()));
+
         int guildCount = 0;
         for (var guild : jda.getGuilds()) {
             guild.updateCommands()
-                .addCommands(ConfigCommands.getCommands())
+                .addCommands(allCommands)
                 .queue(
                     success -> log.info("Force updated commands for guild: {}", guild.getName()),
                     error -> log.error("Failed to force update commands for guild {}: {}", guild.getName(), error.getMessage())
@@ -163,8 +171,17 @@ public class BotService {
         }
 
         try {
-            jda.getGuildById(guildId).updateCommands()
-                .addCommands(ConfigCommands.getCommands())
+            // Combine commands from both handlers
+            var allCommands = new java.util.ArrayList<>(java.util.Arrays.asList(ConfigCommands.getCommands()));
+            allCommands.addAll(java.util.Arrays.asList(joenetCommands.getCommands()));
+
+            var guild = jda.getGuildById(guildId);
+            if (guild == null) {
+                return "Guild not found with ID: " + guildId;
+            }
+
+            guild.updateCommands()
+                .addCommands(allCommands)
                 .queue(
                     success -> log.info("Guild commands registered successfully for guild {}", guildId),
                     error -> log.error("Failed to register guild commands for {}: {}", guildId, error.getMessage())
