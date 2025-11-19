@@ -11,7 +11,9 @@ import org.springframework.http.HttpMethod;
 import org.springframework.http.ResponseEntity;
 import org.springframework.stereotype.Service;
 import org.springframework.web.client.RestTemplate;
+import org.springframework.web.util.UriComponentsBuilder;
 
+import jakarta.annotation.PostConstruct;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
@@ -27,7 +29,7 @@ public class RadarrService {
     private String host;
 
     @Value("${joenet.radarr.port}")
-    private int port;
+    private String port;
 
     @Value("${joenet.radarr.apikey}")
     private String apiKey;
@@ -41,6 +43,33 @@ public class RadarrService {
     @Autowired
     private RestTemplate restTemplate;
 
+    // Computed once after properties are injected
+    private String baseUrl;
+
+    @PostConstruct
+    void init() {
+        String h = host == null ? "" : host.trim();
+        String p = port == null ? "" : port.trim();
+
+        if (h.isEmpty()) {
+            throw new IllegalStateException("RadarrService misconfigured: joenet.host is blank");
+        }
+        if (p.isEmpty()) {
+            // Default to Radarr's common port if not provided
+            p = "7878";
+            log.warn("joenet.radarr.port was blank; defaulting to {}", p);
+        }
+        // Fail fast if port is not numeric
+        if (!p.chars().allMatch(Character::isDigit)) {
+            throw new IllegalStateException("RadarrService misconfigured: joenet.radarr.port must be numeric, got '" + p + "'");
+        }
+
+        this.host = h;
+        this.port = p;
+        this.baseUrl = String.format("http://%s:%s/api/v3", this.host, this.port);
+        log.info("RadarrService configured: {}", this.baseUrl);
+    }
+
     /**
      * Search for movies using Radarr API.
      *
@@ -49,7 +78,11 @@ public class RadarrService {
      */
     public List<MovieSearchResponseDto> searchMovies(String searchTerm) {
         try {
-            String url = String.format("http://%s:%d/api/v3/movie/lookup?term=%s", host, port, searchTerm);
+            String url = UriComponentsBuilder
+                    .fromHttpUrl(baseUrl + "/movie/lookup")
+                    .queryParam("term", searchTerm)
+                    .build(true)
+                    .toUriString();
             log.info("Searching Radarr for movies: {}", searchTerm);
 
             HttpHeaders headers = new HttpHeaders();
@@ -89,7 +122,7 @@ public class RadarrService {
      */
     public boolean downloadMovie(int tmdbId, String movieTitle) {
         try {
-            String url = String.format("http://%s:%d/api/v3/movie", host, port);
+            String url = baseUrl + "/movie";
             log.info("Adding movie to Radarr: {} (TMDB: {})", movieTitle, tmdbId);
 
             HttpHeaders headers = new HttpHeaders();
@@ -126,4 +159,3 @@ public class RadarrService {
         }
     }
 }
-
