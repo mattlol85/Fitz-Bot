@@ -27,7 +27,7 @@ public class RadarrService {
     private String host;
 
     @Value("${joenet.radarr.port}")
-    private int port;
+    private String port;
 
     @Value("${joenet.radarr.apikey}")
     private String apiKey;
@@ -49,7 +49,7 @@ public class RadarrService {
      */
     public List<MovieSearchResponseDto> searchMovies(String searchTerm) {
         try {
-            String url = String.format("http://%s:%d/api/v3/movie/lookup?term=%s", host, port, searchTerm);
+            String url = String.format("http://%s:%s/api/v3/movie/lookup?term=%s", host, port, searchTerm);
             log.info("Searching Radarr for movies: {}", searchTerm);
 
             HttpHeaders headers = new HttpHeaders();
@@ -89,7 +89,7 @@ public class RadarrService {
      */
     public boolean downloadMovie(int tmdbId, String movieTitle) {
         try {
-            String url = String.format("http://%s:%d/api/v3/movie", host, port);
+            String url = String.format("http://%s:%s/api/v3/movie", host, port);
             log.info("Adding movie to Radarr: {} (TMDB: {})", movieTitle, tmdbId);
 
             HttpHeaders headers = new HttpHeaders();
