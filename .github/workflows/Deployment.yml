@@ -175,23 +175,22 @@ jobs:
         ssh pi '
           cd ~/fitz-bot
           
-          # Create application.properties if it does not exist
+          # Create minimal external application.properties if it does not exist (no secrets)
           if [ ! -f config/application.properties ]; then
-            echo "Creating default application.properties..."
-            echo "# Fitz-Bot Configuration" > config/application.properties
-            echo "server.port=8080" >> config/application.properties
-            echo "logging.level.org.fitznet=INFO" >> config/application.properties
+            echo "Creating minimal external application.properties..."
+            echo "# External overrides - no secrets" > config/application.properties
             echo "logging.file.name=logs/fitz-bot.log" >> config/application.properties
-            echo "✅ Created default configuration"
+            echo "logging.level.org.fitznet=INFO" >> config/application.properties
+            echo "server.port=8080" >> config/application.properties
+            echo "✅ Created minimal configuration"
           else
-            echo "ℹ️  Configuration file already exists - updating log path"
-            # Update or add the logging.file.name property
+            echo "ℹ️  External configuration exists - ensuring log path"
             if grep -q "logging.file.name=" config/application.properties; then
               sed -i "s|logging.file.name=.*|logging.file.name=logs/fitz-bot.log|" config/application.properties
             else
               echo "logging.file.name=logs/fitz-bot.log" >> config/application.properties
             fi
-            echo "✅ Updated log file path to logs/fitz-bot.log"
+            echo "✅ Updated log file path"
           fi
           
           # Set version info
@@ -204,74 +203,37 @@ jobs:
 
     - name: 🚀 Start application
       run: |
-        echo "::group::Starting application"
+        echo "::group::Launching application"
         ssh pi "
           cd ~/fitz-bot
-          
-          # Start the application in the background with Discord token from environment
-          echo 'Starting Fitz-Bot...'
-          DISCORD_BOT_TOKEN='${{ secrets.DISCORD_BOT_TOKEN }}' nohup java -jar current.jar \
-            --spring.config.location=config/application.properties \
+          echo 'Starting Fitz-Bot with command-line property overrides...'
+          nohup java -jar current.jar \
+            --discord.bot.token='${{ secrets.DISCORD_BOT_TOKEN }}' \
+            --joenet.host='${{ secrets.JOENET_HOST }}' \
+            --joenet.radarr.port='${{ secrets.JOENET_RADARR_PORT }}' \
+            --joenet.radarr.apikey='${{ secrets.JOENET_RADARR_APIKEY }}' \
+            --joenet.sonarr.port='${{ secrets.JOENET_SONARR_PORT }}' \
+            --joenet.sonarr.apikey='${{ secrets.JOENET_SONARR_APIKEY }}' \
+            --spring.config.additional-location=classpath:/,file:config/application.properties \
             > logs/fitz-bot.log 2>&1 &
-          
-          echo 'Application started with PID: '\$!
-          
-          # Wait a moment for startup
-          sleep 5
-          
-          # Check if application is running
-          if pgrep -f 'current.jar' > /dev/null; then
-            echo '✅ Fitz-Bot is running successfully!'
-            echo 'PID: '$(pgrep -f 'current.jar')
-          else
-            echo '❌ Failed to start Fitz-Bot'
-            echo 'Last 10 lines of log:'
-            tail -10 logs/fitz-bot.log || echo 'No log file found'
-            exit 1
-          fi
+          APP_PID=$!; echo "Started with PID: $APP_PID"; sleep 6;
+          if pgrep -f 'current.jar' > /dev/null; then echo '✅ Fitz-Bot is running'; else echo '❌ Startup failed'; tail -20 logs/fitz-bot.log || true; exit 1; fi
         "
-        echo "✅ Application started successfully"
+        echo "✅ Launch step complete"
         echo "::endgroup::"
 
     - name: 🏥 Health check - Verify deployment
       run: |
         echo "::group::Verifying deployment"
-        
-        # Wait for application to fully start
-        echo "Waiting for application to start..."
-        sleep 15
-        
+        sleep 12
         ssh pi "
           cd ~/fitz-bot
-          
           echo '=== Process Status ==='
-          if pgrep -f 'current.jar' > /dev/null; then
-            echo '✅ Process is running (PID: '$(pgrep -f 'current.jar')')'
-          else
-            echo '❌ Process is not running'
-            exit 1
-          fi
-          
-          echo ''
-          echo '=== Log Check ==='
-          if [ -f logs/fitz-bot.log ]; then
-            echo 'Last 5 lines of log:'
-            tail -5 logs/fitz-bot.log
-          else
-            echo '⚠️  No log file found'
-          fi
-          
-          echo ''
-          echo '=== Port Check ==='
-          if netstat -tuln | grep ':8080' > /dev/null; then
-            echo '✅ Application is listening on port 8080'
-          else
-            echo 'ℹ️  Port 8080 not detected (may be normal if no web server)'
-          fi
+          if pgrep -f 'current.jar' > /dev/null; then echo '✅ Process running (PID:' $(pgrep -f 'current.jar') ')'; else echo '❌ Process not running'; exit 1; fi
+          echo '\n=== Log Tail (last 10) ==='; [ -f logs/fitz-bot.log ] && tail -10 logs/fitz-bot.log || echo 'Log missing'
+          echo '\n=== Port Check ==='; netstat -tuln | grep ':8080' >/dev/null && echo '✅ Port 8080 listening' || echo 'ℹ️ Port 8080 not detected yet'
         "
-        
-        echo "✅ Deployment verification completed"
-        echo "🎉 Fitz-Bot deployed successfully to Raspberry Pi!"
+        echo "✅ Health check done"
         echo "::endgroup::"
 
     - name: 📋 Deployment summary
@@ -282,30 +244,22 @@ jobs:
         echo "**JAR:** $JAR_NAME"
         echo "**Deployment Time:** $(date -u '+%Y-%m-%d %H:%M:%S UTC')"
         echo "**Build:** #${{ github.run_number }}"
-        echo ""
-        echo "### 📁 Deployment Structure"
-        echo "- **Application:** ~/fitz-bot/current.jar"
-        echo "- **Config:** ~/fitz-bot/config/"
-        echo "- **Logs:** ~/fitz-bot/logs/"
-        echo "- **Deployments:** ~/fitz-bot/deployments/"
-        echo ""
-        echo "### 🔗 Quick Commands"
-        echo "\`\`\`bash"
-        echo "# Check status"
+        echo "\n### 📁 Deployment Structure"
+        echo "- Application: ~/fitz-bot/current.jar"
+        echo "- Config: ~/fitz-bot/config/"
+        echo "- Logs: ~/fitz-bot/logs/"
+        echo "- Deployments: ~/fitz-bot/deployments/"
+        echo "\n### 🔗 Quick Commands"
+        echo "\n\n\`\`\`bash"
         echo "ssh ${{ secrets.PI_USER }}@${{ secrets.PI_HOST }} 'pgrep -f current.jar'"
-        echo ""
-        echo "# View logs"
         echo "ssh ${{ secrets.PI_USER }}@${{ secrets.PI_HOST }} 'tail -f ~/fitz-bot/logs/fitz-bot.log'"
-        echo ""
-        echo "# Restart application"
-        echo "ssh ${{ secrets.PI_USER }}@${{ secrets.PI_HOST }} 'pkill -f current.jar && cd ~/fitz-bot && nohup java -jar current.jar > logs/fitz-bot.log 2>&1 &'"
+        echo "ssh ${{ secrets.PI_USER }}@${{ secrets.PI_HOST }} 'pkill -f current.jar && cd ~/fitz-bot && nohup java -jar current.jar --discord.bot.token=REDACTED > logs/fitz-bot.log 2>&1 &'"
         echo "\`\`\`"
 
     - name: 🧹 Cleanup SSH key
       if: always()
       run: |
         echo "::group::Cleaning up SSH key"
-        rm -f ~/.ssh/pi_key
-        rm -f ~/.ssh/config
+        rm -f ~/.ssh/pi_key ~/.ssh/config
         echo "✅ SSH key cleaned up"
         echo "::endgroup::"
