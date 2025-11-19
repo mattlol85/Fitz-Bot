@@ -81,7 +81,8 @@ public class RadarrService {
             String url = UriComponentsBuilder
                     .fromHttpUrl(baseUrl + "/movie/lookup")
                     .queryParam("term", searchTerm)
-                    .build(true)
+                    .build()
+                    .encode()
                     .toUriString();
             log.info("Searching Radarr for movies: {}", searchTerm);
 
