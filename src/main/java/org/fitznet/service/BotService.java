@@ -8,6 +8,7 @@ import net.dv8tion.jda.api.OnlineStatus;
 import net.dv8tion.jda.api.entities.Activity;
 import org.fitznet.commands.ConfigCommands;
 import org.fitznet.commands.JoenetCommands;
+import org.fitznet.commands.MilkCommands;
 import org.fitznet.listener.LoginListener;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
@@ -61,6 +62,7 @@ public class BotService {
             jda.addEventListener(new LoginListener());
             jda.addEventListener(new ConfigCommands());
             jda.addEventListener(joenetCommands);
+            jda.addEventListener(new MilkCommands());
 
             // Small delay to ensure guild cache is fully populated
             Thread.sleep(2000);
@@ -70,9 +72,10 @@ public class BotService {
                 log.warn("No guilds found after startup - guild cache may not be ready yet");
             }
 
-            // Combine commands from both handlers
+            // Combine commands from all handlers
             var allCommands = new java.util.ArrayList<>(java.util.Arrays.asList(ConfigCommands.getCommands()));
             allCommands.addAll(java.util.Arrays.asList(JoenetCommands.getCommands()));
+            allCommands.addAll(java.util.Arrays.asList(MilkCommands.getCommands()));
 
             for (var guild : jda.getGuilds()) {
                 guild.updateCommands()
@@ -146,9 +149,10 @@ public class BotService {
             return "Bot is not running!";
         }
 
-        // Combine commands from both handlers
+        // Combine commands from all handlers
         var allCommands = new java.util.ArrayList<>(java.util.Arrays.asList(ConfigCommands.getCommands()));
         allCommands.addAll(java.util.Arrays.asList(JoenetCommands.getCommands()));
+        allCommands.addAll(java.util.Arrays.asList(MilkCommands.getCommands()));
 
         int guildCount = 0;
         for (var guild : jda.getGuilds()) {
@@ -176,9 +180,10 @@ public class BotService {
         }
 
         try {
-            // Combine commands from both handlers
+            // Combine commands from all handlers
             var allCommands = new java.util.ArrayList<>(java.util.Arrays.asList(ConfigCommands.getCommands()));
             allCommands.addAll(java.util.Arrays.asList(joenetCommands.getCommands()));
+            allCommands.addAll(java.util.Arrays.asList(MilkCommands.getCommands()));
 
             var guild = jda.getGuildById(guildId);
             if (guild == null) {

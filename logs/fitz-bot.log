@@ -1,0 +1,9 @@
+2025-12-06 02:21:56 [ForkJoinPool-1-worker-1] INFO  org.fitznet.MainTest - Starting MainTest using Java 17.0.17 with PID 4353 (started by runner in /home/runner/work/Fitz-Bot/Fitz-Bot)
+2025-12-06 02:21:56 [ForkJoinPool-1-worker-1] DEBUG org.fitznet.MainTest - Running with Spring Boot v3.2.6, Spring v6.1.8
+2025-12-06 02:21:56 [ForkJoinPool-1-worker-1] INFO  org.fitznet.MainTest - No active profile set, falling back to 1 default profile: "default"
+2025-12-06 02:22:00 [ForkJoinPool-1-worker-2] INFO  org.fitznet.commands.MilkCommands - Received /milk command from user: TestUser in guild: Test Guild
+2025-12-06 02:22:00 [ForkJoinPool-1-worker-2] INFO  org.fitznet.commands.MilkCommands - Successfully sent milk image to user: TestUser
+2025-12-06 02:22:00 [ForkJoinPool-1-worker-1] INFO  org.fitznet.service.RadarrService - RadarrService configured: http://your-host-here:7878/api/v3
+2025-12-06 02:22:01 [ForkJoinPool-1-worker-1] INFO  o.s.b.a.e.web.EndpointLinksResolver - Exposing 4 endpoint(s) beneath base path '/actuator'
+2025-12-06 02:22:01 [ForkJoinPool-1-worker-1] INFO  org.fitznet.MainTest - Started MainTest in 6.229 seconds (process running for 8.319)
+2025-12-06 02:22:02 [ForkJoinPool-1-worker-1] INFO  org.fitznet.Main - Starting Discord bot automatically...
