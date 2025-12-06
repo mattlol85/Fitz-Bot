@@ -9,15 +9,13 @@ import net.dv8tion.jda.api.interactions.commands.build.SlashCommandData;
 
 import java.awt.Color;
 import java.util.List;
-import java.util.Random;
+import java.util.concurrent.ThreadLocalRandom;
 
 /**
  * Slash command handler for the /milk command that returns a random milk image.
  */
 @Slf4j
 public class MilkCommands extends ListenerAdapter {
-
-    private static final Random RANDOM = new Random();
 
     /**
      * List of milk-related image URLs.
@@ -74,8 +72,8 @@ public class MilkCommands extends ListenerAdapter {
      *
      * @return A random milk image URL.
      */
-    String getRandomMilkImage() {
-        return MILK_IMAGES.get(RANDOM.nextInt(MILK_IMAGES.size()));
+    static String getRandomMilkImage() {
+        return MILK_IMAGES.get(ThreadLocalRandom.current().nextInt(MILK_IMAGES.size()));
     }
 
     /**

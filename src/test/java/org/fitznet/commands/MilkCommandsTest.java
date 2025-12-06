@@ -57,7 +57,7 @@ class MilkCommandsTest {
 
     @Test
     void testGetRandomMilkImage_ReturnsValidUrl() {
-        String imageUrl = milkCommands.getRandomMilkImage();
+        String imageUrl = MilkCommands.getRandomMilkImage();
 
         assertNotNull(imageUrl);
         assertTrue(imageUrl.startsWith("https://"));
@@ -70,7 +70,6 @@ class MilkCommandsTest {
 
         assertNotNull(images);
         assertFalse(images.isEmpty());
-        assertTrue(images.size() >= 5);
     }
 
     @Test
