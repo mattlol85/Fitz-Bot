@@ -13,6 +13,8 @@ A Discord bot built with Java and Spring Boot that tracks voice channel joins an
 - ⚙️ **Configurable Bot Channels** - Set which channel receives milestone notifications per server
 - 🔧 **REST API Management** - Full bot control via HTTP endpoints
 - 📊 **Reliable Statistics** - Robust data persistence with JSON serialization and MongoDB-ready schema
+- 🎬 **Media Download Integration** - Search and download movies via Radarr integration
+- 📺 **TV Show Downloads** - Search and download TV shows via Sonarr with flexible season selection
 
 ## Tech Stack
 
@@ -76,6 +78,14 @@ Set the channel where milestone messages will be sent.
 #### `/getbotchannel`
 Shows the currently configured bot channel for your server.
 
+#### `/joenet download`
+Search and download movies or TV shows from your Radarr/Sonarr instance.
+- Select between Movies or TV Shows
+- Search by title
+- Select from up to 5 results
+- For TV shows: Choose specific seasons or all seasons
+- **Example**: `/joenet download` → Select "Movies" → Enter "Breaking Bad" → Select result
+
 ### REST API Endpoints
 
 The bot provides HTTP endpoints for management:
@@ -103,6 +113,33 @@ POST http://localhost:8080/bot/register-guild-commands/{guildId}
 Each Discord server can configure:
 - **Bot Channel**: Where milestone messages are sent
 - **Custom Milestones**: Override default milestone thresholds (future feature)
+
+### JoeNet Media Download Configuration
+Configure Radarr and Sonarr integration in `application.properties`:
+
+```properties
+# JoeNet Host Configuration
+joenet.host=${JOENET_HOST:your-host-here}
+
+# Radarr Configuration (Movies)
+joenet.radarr.port=7878
+joenet.radarr.apikey=${JOENET_RADARR_APIKEY:your-api-key-here}
+joenet.radarr.quality-profile-id=${JOENET_RADARR_QUALITY_PROFILE_ID:4}
+joenet.radarr.root-folder-path=${JOENET_RADARR_ROOT_FOLDER_PATH:P:\\\\Plex\\\\Movies}
+
+# Sonarr Configuration (TV Shows)
+joenet.sonarr.port=8989
+joenet.sonarr.apikey=${JOENET_SONARR_APIKEY:your-api-key-here}
+joenet.sonarr.quality-profile-id=${JOENET_SONARR_QUALITY_PROFILE_ID:4}
+joenet.sonarr.root-folder-path=${JOENET_SONARR_ROOT_FOLDER_PATH:P:\\\\Plex\\\\TV}
+```
+
+**Features:**
+- **Movie Downloads**: Search movies via Radarr API by title (TMDB lookup)
+- **TV Show Downloads**: Search series via Sonarr API by title (TVDB lookup)
+- **Flexible Season Selection**: Download all seasons, specific seasons, or multiple seasons
+- **Interactive Discord UI**: Button-driven interface with dropdown menus
+- **Error Handling**: Graceful handling of duplicate media and connection errors
 
 ### As Of Date Tracking
 The bot automatically tracks when voice channel monitoring begins for each server:
@@ -160,27 +197,6 @@ The bot automatically deletes empty voice channels that match these patterns:
 - **Version Control**: Schema versioning support for future data migrations
 
 ## Development
-
-### Project Structure
-```
-src/main/java/org/fitznet/
-├── Main.java                 # Spring Boot application entry point
-├── BotController.java        # REST API endpoints
-├── service/
-│   └── BotService.java       # Core bot management logic
-├── commands/
-│   └── ConfigCommands.java   # Slash command handlers
-├── listener/
-│   └── LoginListener.java    # Voice event processing
-├── data/
-│   ├── GuildConfigDatabase.java  # Configuration persistence
-│   └── model/
-│       └── GuildConfig.java      # Configuration POJO
-└── util/
-    ├── EmbedUtil.java        # Discord embed utilities
-    ├── JsonUtils.java        # JSON processing utilities
-    └── Constants.java        # Application constants
-```
 
 ### Running Tests
 ```bash

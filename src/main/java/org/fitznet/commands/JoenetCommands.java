@@ -15,10 +15,14 @@ import net.dv8tion.jda.api.interactions.components.text.TextInput;
 import net.dv8tion.jda.api.interactions.components.text.TextInputStyle;
 import net.dv8tion.jda.api.interactions.modals.Modal;
 import org.fitznet.dto.radarr.MovieSearchResponseDto;
+import org.fitznet.dto.sonarr.Season;
+import org.fitznet.dto.sonarr.SeriesSearchResponseDto;
 import org.fitznet.service.RadarrService;
+import org.fitznet.service.SonarrService;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 
+import java.util.ArrayList;
 import java.util.List;
 import java.util.stream.Collectors;
 
@@ -31,6 +35,9 @@ public class JoenetCommands extends ListenerAdapter {
 
     @Autowired
     private RadarrService radarrService;
+
+    @Autowired
+    private SonarrService sonarrService;
 
     /**
      * Gets the slash command definitions.
@@ -90,7 +97,7 @@ public class JoenetCommands extends ListenerAdapter {
         log.info("Processing /joenet download command");
 
         Button moviesButton = Button.primary("joenet:movies", "🎬 Movies");
-        Button tvButton = Button.secondary("joenet:tv", "📺 TV Shows (Coming Soon)").asDisabled();
+        Button tvButton = Button.secondary("joenet:tv", "📺 TV Shows");
 
         event.getHook().editOriginal("Select the type of media you want to download:")
                 .setActionRow(moviesButton, tvButton)
@@ -111,8 +118,7 @@ public class JoenetCommands extends ListenerAdapter {
             if ("joenet:movies".equals(buttonId)) {
                 handleMoviesButton(event);
             } else if ("joenet:tv".equals(buttonId)) {
-                event.reply("📺 TV show downloads are not yet implemented. Stay tuned!")
-                        .setEphemeral(true).queue();
+                handleTvButton(event);
             }
         } catch (Exception e) {
             log.error("Error handling button interaction: {}", buttonId, e);
@@ -131,7 +137,24 @@ public class JoenetCommands extends ListenerAdapter {
                 .setMaxLength(100)
                 .build();
 
-        Modal modal = Modal.create("joenet:search", "Search for Movies")
+        Modal modal = Modal.create("joenet:search:movie", "Search for Movies")
+                .addActionRow(searchInput)
+                .build();
+
+        event.replyModal(modal).queue();
+    }
+
+    private void handleTvButton(ButtonInteractionEvent event) {
+        log.info("User selected TV Shows button");
+
+        TextInput searchInput = TextInput.create("search-term", "TV Show Name", TextInputStyle.SHORT)
+                .setPlaceholder("Enter TV show name (e.g., Breaking Bad)")
+                .setRequired(true)
+                .setMinLength(1)
+                .setMaxLength(100)
+                .build();
+
+        Modal modal = Modal.create("joenet:search:tv", "Search for TV Shows")
                 .addActionRow(searchInput)
                 .build();
 
@@ -149,8 +172,10 @@ public class JoenetCommands extends ListenerAdapter {
         log.info("Modal interaction: {} from user: {}", modalId, event.getUser().getName());
 
         try {
-            if ("joenet:search".equals(modalId)) {
-                handleSearchModal(event);
+            if ("joenet:search:movie".equals(modalId)) {
+                handleMovieSearchModal(event);
+            } else if ("joenet:search:tv".equals(modalId)) {
+                handleTvSearchModal(event);
             }
         } catch (Exception e) {
             log.error("Error handling modal interaction: {}", modalId, e);
@@ -159,7 +184,7 @@ public class JoenetCommands extends ListenerAdapter {
         }
     }
 
-    private void handleSearchModal(ModalInteractionEvent event) {
+    private void handleMovieSearchModal(ModalInteractionEvent event) {
         String searchTerm = event.getValue("search-term").getAsString().trim();
         log.info("Searching for movies with term: {}", searchTerm);
 
@@ -176,7 +201,7 @@ public class JoenetCommands extends ListenerAdapter {
         }
 
         // Build select menu with results
-        StringSelectMenu.Builder menuBuilder = StringSelectMenu.create("joenet:select")
+        StringSelectMenu.Builder menuBuilder = StringSelectMenu.create("joenet:select:movie")
                 .setPlaceholder("Select a movie to download");
 
         for (MovieSearchResponseDto movie : results) {
@@ -188,6 +213,41 @@ public class JoenetCommands extends ListenerAdapter {
         }
 
         event.getHook().editOriginal(String.format("Found %d movie(s) for '%s':", results.size(), searchTerm))
+                .setActionRow(menuBuilder.build())
+                .queue();
+    }
+
+    private void handleTvSearchModal(ModalInteractionEvent event) {
+        String searchTerm = event.getValue("search-term").getAsString().trim();
+        log.info("Searching for TV shows with term: {}", searchTerm);
+
+        event.deferReply(true).queue();
+
+        // Search for TV series using Sonarr API
+        List<SeriesSearchResponseDto> results = sonarrService.searchSeries(searchTerm);
+
+        if (results.isEmpty()) {
+            event.getHook().editOriginal(
+                    String.format("❌ No TV shows found for '%s'. Try a different search term.", searchTerm)
+            ).queue();
+            return;
+        }
+
+        // Build select menu with results
+        StringSelectMenu.Builder menuBuilder = StringSelectMenu.create("joenet:select:tv")
+                .setPlaceholder("Select a TV show to download");
+
+        for (SeriesSearchResponseDto series : results) {
+            String label = series.getYear() != null
+                    ? String.format("%s (%d)", series.getTitle(), series.getYear())
+                    : series.getTitle();
+            String description = buildSeriesDescription(series);
+            String value = String.format("%d:%s", series.getTvdbId(), series.getTitle());
+
+            menuBuilder.addOption(label, value, description);
+        }
+
+        event.getHook().editOriginal(String.format("Found %d TV show(s) for '%s':", results.size(), searchTerm))
                 .setActionRow(menuBuilder.build())
                 .queue();
     }
@@ -212,6 +272,34 @@ public class JoenetCommands extends ListenerAdapter {
         return result.isEmpty() ? "Movie" : result;
     }
 
+    private String buildSeriesDescription(SeriesSearchResponseDto series) {
+        StringBuilder description = new StringBuilder();
+
+        // Add status if available
+        if (series.getStatus() != null && !series.getStatus().isEmpty()) {
+            description.append(series.getStatus());
+        }
+
+        // Add first 2 genres if available
+        if (series.getGenres() != null && !series.getGenres().isEmpty()) {
+            if (description.length() > 0) {
+                description.append(" • ");
+            }
+            String genres = series.getGenres().stream()
+                    .limit(2)
+                    .collect(Collectors.joining(", "));
+            description.append(genres);
+        }
+
+        // Truncate to fit Discord's 100 character limit for select option descriptions
+        String result = description.toString();
+        if (result.length() > 100) {
+            result = result.substring(0, 97) + "...";
+        }
+
+        return result.isEmpty() ? "TV Show" : result;
+    }
+
     @Override
     public void onStringSelectInteraction(StringSelectInteractionEvent event) {
         String selectId = event.getComponentId();
@@ -223,8 +311,12 @@ public class JoenetCommands extends ListenerAdapter {
         log.info("Select interaction: {} from user: {}", selectId, event.getUser().getName());
 
         try {
-            if ("joenet:select".equals(selectId)) {
+            if ("joenet:select:movie".equals(selectId)) {
                 handleMovieSelection(event);
+            } else if ("joenet:select:tv".equals(selectId)) {
+                handleSeriesSelection(event);
+            } else if (selectId.startsWith("joenet:seasons:")) {
+                handleSeasonSelection(event);
             }
         } catch (Exception e) {
             log.error("Error handling select interaction: {}", selectId, e);
@@ -268,6 +360,150 @@ public class JoenetCommands extends ListenerAdapter {
             event.getHook().editOriginal(
                     String.format("❌ Failed to add **%s** to the download queue.\n" +
                             "The movie may already exist in your library, or there was an error communicating with Radarr.", movieTitle)
+            ).queue();
+        }
+    }
+
+    private void handleSeriesSelection(StringSelectInteractionEvent event) {
+        String selectedValue = event.getValues().get(0);
+        log.info("User selected TV series: {}", selectedValue);
+
+        // Parse tvdbId and title from value (format: "tvdbId:title")
+        String[] parts = selectedValue.split(":", 2);
+        if (parts.length != 2) {
+            event.reply("❌ Invalid TV show selection.").setEphemeral(true).queue();
+            return;
+        }
+
+        int tvdbId;
+        try {
+            tvdbId = Integer.parseInt(parts[0]);
+        } catch (NumberFormatException e) {
+            event.reply("❌ Invalid TV show ID.").setEphemeral(true).queue();
+            return;
+        }
+
+        String seriesTitle = parts[1];
+
+        event.deferReply(true).queue();
+
+        // Search for the series again to get season information
+        List<SeriesSearchResponseDto> results = sonarrService.searchSeries(seriesTitle);
+        SeriesSearchResponseDto selectedSeries = results.stream()
+                .filter(s -> s.getTvdbId().equals(tvdbId))
+                .findFirst()
+                .orElse(null);
+
+        if (selectedSeries == null || selectedSeries.getSeasons() == null || selectedSeries.getSeasons().isEmpty()) {
+            event.getHook().editOriginal("❌ Could not retrieve season information for this show.").queue();
+            return;
+        }
+
+        List<Season> seasons = selectedSeries.getSeasons();
+
+        // Filter out season 0 (specials) if present
+        seasons = seasons.stream()
+                .filter(s -> s.getSeasonNumber() > 0)
+                .collect(Collectors.toList());
+
+        if (seasons.isEmpty()) {
+            event.getHook().editOriginal("❌ No seasons available for this show.").queue();
+            return;
+        }
+
+        // Build season selection menu
+        StringSelectMenu.Builder menuBuilder = StringSelectMenu.create("joenet:seasons:" + tvdbId + ":" + seriesTitle)
+                .setPlaceholder("Select seasons to download")
+                .setMinValues(1)
+                .setMaxValues(Math.min(seasons.size() + 1, 25)); // +1 for "All Seasons" option, max 25
+
+        // Add "All Seasons" option
+        menuBuilder.addOption("All Seasons", "all", "Download all available seasons");
+
+        // Add individual season options (limit to 24 to stay under Discord's 25 option limit)
+        for (Season season : seasons.stream().limit(24).collect(Collectors.toList())) {
+            String label = "Season " + season.getSeasonNumber();
+            String value = String.valueOf(season.getSeasonNumber());
+            menuBuilder.addOption(label, value);
+        }
+
+        event.getHook().editOriginal(String.format("**%s** has %d season(s). Select which seasons to download:",
+                seriesTitle, seasons.size()))
+                .setActionRow(menuBuilder.build())
+                .queue();
+    }
+
+    private void handleSeasonSelection(StringSelectInteractionEvent event) {
+        String selectId = event.getComponentId();
+        log.info("User selected seasons with ID: {}", selectId);
+
+        // Parse tvdbId and title from selectId (format: "joenet:seasons:tvdbId:title")
+        String[] parts = selectId.split(":", 4);
+        if (parts.length != 4) {
+            event.reply("❌ Invalid season selection.").setEphemeral(true).queue();
+            return;
+        }
+
+        int tvdbId;
+        try {
+            tvdbId = Integer.parseInt(parts[2]);
+        } catch (NumberFormatException e) {
+            event.reply("❌ Invalid TV show ID.").setEphemeral(true).queue();
+            return;
+        }
+
+        String seriesTitle = parts[3];
+        List<String> selectedValues = event.getValues();
+
+        event.deferReply(true).queue();
+
+        // Search for the series again to get full season information
+        List<SeriesSearchResponseDto> results = sonarrService.searchSeries(seriesTitle);
+        SeriesSearchResponseDto selectedSeries = results.stream()
+                .filter(s -> s.getTvdbId().equals(tvdbId))
+                .findFirst()
+                .orElse(null);
+
+        if (selectedSeries == null || selectedSeries.getSeasons() == null) {
+            event.getHook().editOriginal("❌ Could not retrieve season information for this show.").queue();
+            return;
+        }
+
+        List<Season> seasonsToDownload = new ArrayList<>();
+
+        if (selectedValues.contains("all")) {
+            // Monitor all seasons (except season 0)
+            seasonsToDownload = selectedSeries.getSeasons().stream()
+                    .filter(s -> s.getSeasonNumber() > 0)
+                    .map(s -> new Season(s.getSeasonNumber(), true))
+                    .collect(Collectors.toList());
+        } else {
+            // Monitor only selected seasons
+            List<Integer> selectedSeasonNumbers = selectedValues.stream()
+                    .map(Integer::parseInt)
+                    .collect(Collectors.toList());
+
+            for (Season season : selectedSeries.getSeasons()) {
+                boolean monitored = selectedSeasonNumbers.contains(season.getSeasonNumber());
+                seasonsToDownload.add(new Season(season.getSeasonNumber(), monitored));
+            }
+        }
+
+        // Add series to Sonarr
+        boolean success = sonarrService.downloadSeries(tvdbId, seriesTitle, seasonsToDownload);
+
+        if (success) {
+            String seasonInfo = selectedValues.contains("all")
+                    ? "all seasons"
+                    : selectedValues.size() + " season(s)";
+            event.getHook().editOriginal(
+                    String.format("✅ Successfully added **%s** (%s) to the download queue!\n" +
+                            "The episodes will be downloaded automatically.", seriesTitle, seasonInfo)
+            ).queue();
+        } else {
+            event.getHook().editOriginal(
+                    String.format("❌ Failed to add **%s** to the download queue.\n" +
+                            "The show may already exist in your library, or there was an error communicating with Sonarr.", seriesTitle)
             ).queue();
         }
     }
