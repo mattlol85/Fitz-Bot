@@ -147,6 +147,7 @@ jobs:
         echo "$COMMIT_MSG"
         
         # Use simpler, more robust regex patterns
+        # Note: In character classes, backslash-escape the opening paren to avoid parse errors
         if [[ "$COMMIT_MSG" =~ ^major[:\(] ]]; then
           NEW_MAJOR=$((MAJOR + 1))
           NEW_MINOR=0
