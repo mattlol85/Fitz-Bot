@@ -146,19 +146,20 @@ jobs:
         echo "📝 Commit message:"
         echo "$COMMIT_MSG"
         
-        if [[ "$COMMIT_MSG" =~ ^major(\(|:) ]]; then
+        # Use simpler, more robust regex patterns
+        if [[ "$COMMIT_MSG" =~ ^major[:\(] ]]; then
           NEW_MAJOR=$((MAJOR + 1))
           NEW_MINOR=0
           NEW_PATCH=0
           INCREMENT_TYPE="major"
           EMOJI="🚀"
-        elif [[ "$COMMIT_MSG" =~ ^(fix\(|fix:) ]]; then
+        elif [[ "$COMMIT_MSG" =~ ^fix[:\(] ]]; then
           NEW_MAJOR=$MAJOR
           NEW_MINOR=$MINOR
           NEW_PATCH=$((PATCH + 1))
           INCREMENT_TYPE="patch"
           EMOJI="🐛"
-        elif [[ "$COMMIT_MSG" =~ ^chore\( ]]; then
+        elif [[ "$COMMIT_MSG" =~ ^chore[:\(] ]]; then
           NEW_MAJOR=$MAJOR
           NEW_MINOR=$MINOR
           NEW_PATCH=$((PATCH + 1))
