@@ -43,5 +43,6 @@ class MainTest {
 
         // Verify that BotService.stopBot() was called
         verify(mockBotService).stopBot();
+
     }
 }
