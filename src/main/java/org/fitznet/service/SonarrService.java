@@ -1,10 +1,13 @@
 package org.fitznet.service;
 
 import lombok.extern.slf4j.Slf4j;
+import org.fitznet.dto.sonarr.EpisodeDto;
+import org.fitznet.dto.sonarr.EpisodeSearchCommandDto;
 import org.fitznet.dto.sonarr.Season;
 import org.fitznet.dto.sonarr.SeriesDownloadRequestDto;
 import org.fitznet.dto.sonarr.SeriesSearchResponseDto;
 import org.fitznet.dto.sonarr.SonarrQueueItemDto;
+import org.fitznet.dto.sonarr.SonarrSeriesDto;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpEntity;
@@ -18,6 +21,7 @@ import org.springframework.web.util.UriComponentsBuilder;
 import jakarta.annotation.PostConstruct;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Comparator;
 import java.util.List;
 
 /**
@@ -202,6 +206,130 @@ public class SonarrService {
         } catch (Exception e) {
             log.error("Error fetching Sonarr queue details: {}", e.getMessage(), e);
             throw e;
+        }
+    }
+
+    /**
+     * Looks up a series in the Sonarr library by its TVDB ID.
+     *
+     * @param tvdbId the TVDB ID of the series
+     * @return the first matching {@link SonarrSeriesDto}, or {@code null} if not in the library
+     */
+    public SonarrSeriesDto getSeriesByTvdbId(int tvdbId) {
+        try {
+            String url = UriComponentsBuilder
+                    .fromHttpUrl(baseUrl + "/series")
+                    .queryParam("tvdbId", tvdbId)
+                    .build()
+                    .toUriString();
+            log.info("Looking up Sonarr library series by TVDB ID: {}", tvdbId);
+
+            HttpHeaders headers = new HttpHeaders();
+            headers.set("X-Api-Key", apiKey);
+            HttpEntity<String> entity = new HttpEntity<>(headers);
+
+            ResponseEntity<SonarrSeriesDto[]> response = restTemplate.exchange(
+                    url,
+                    HttpMethod.GET,
+                    entity,
+                    SonarrSeriesDto[].class
+            );
+
+            if (response.getBody() == null || response.getBody().length == 0) {
+                log.info("Series with TVDB ID {} is not in the Sonarr library", tvdbId);
+                return null;
+            }
+
+            SonarrSeriesDto found = response.getBody()[0];
+            log.info("Found series '{}' in Sonarr library with internal ID: {}", found.getTitle(), found.getId());
+            return found;
+
+        } catch (Exception e) {
+            log.error("Error looking up series by TVDB ID {}: {}", tvdbId, e.getMessage(), e);
+            return null;
+        }
+    }
+
+    /**
+     * Retrieves all episodes for a specific season of a series already in the Sonarr library.
+     *
+     * @param sonarrSeriesId the internal Sonarr series ID (from {@link #getSeriesByTvdbId})
+     * @param seasonNumber   the season number to fetch episodes for
+     * @return list of episodes sorted by episode number, or empty list on error
+     */
+    public List<EpisodeDto> getEpisodes(int sonarrSeriesId, int seasonNumber) {
+        try {
+            String url = UriComponentsBuilder
+                    .fromHttpUrl(baseUrl + "/episode")
+                    .queryParam("seriesId", sonarrSeriesId)
+                    .queryParam("seasonNumber", seasonNumber)
+                    .build()
+                    .toUriString();
+            log.info("Fetching episodes for Sonarr series ID {} season {}", sonarrSeriesId, seasonNumber);
+
+            HttpHeaders headers = new HttpHeaders();
+            headers.set("X-Api-Key", apiKey);
+            HttpEntity<String> entity = new HttpEntity<>(headers);
+
+            ResponseEntity<EpisodeDto[]> response = restTemplate.exchange(
+                    url,
+                    HttpMethod.GET,
+                    entity,
+                    EpisodeDto[].class
+            );
+
+            if (response.getBody() == null) {
+                log.warn("Sonarr episode endpoint returned null body");
+                return new ArrayList<>();
+            }
+
+            List<EpisodeDto> episodes = new ArrayList<>(Arrays.asList(response.getBody()));
+            episodes.sort(Comparator.comparingInt(e -> e.getEpisodeNumber() != null ? e.getEpisodeNumber() : 0));
+            log.info("Found {} episodes for series ID {} season {}", episodes.size(), sonarrSeriesId, seasonNumber);
+            return episodes;
+
+        } catch (Exception e) {
+            log.error("Error fetching episodes for series ID {} season {}: {}", sonarrSeriesId, seasonNumber, e.getMessage(), e);
+            return new ArrayList<>();
+        }
+    }
+
+    /**
+     * Triggers an episode search (download) for the given episode IDs via the Sonarr command endpoint.
+     *
+     * @param episodeIds the Sonarr internal episode IDs to search for
+     * @return true if the command was accepted, false otherwise
+     */
+    public boolean triggerEpisodeSearch(List<Integer> episodeIds) {
+        try {
+            String url = baseUrl + "/command";
+            log.info("Triggering Sonarr EpisodeSearch for episode IDs: {}", episodeIds);
+
+            HttpHeaders headers = new HttpHeaders();
+            headers.set("X-Api-Key", apiKey);
+            headers.set("Content-Type", "application/json");
+
+            EpisodeSearchCommandDto commandDto = new EpisodeSearchCommandDto(episodeIds);
+            HttpEntity<EpisodeSearchCommandDto> entity = new HttpEntity<>(commandDto, headers);
+
+            ResponseEntity<String> response = restTemplate.exchange(
+                    url,
+                    HttpMethod.POST,
+                    entity,
+                    String.class
+            );
+
+            if (response.getStatusCode().is2xxSuccessful()) {
+                log.info("Successfully triggered episode search for IDs: {}", episodeIds);
+                return true;
+            } else {
+                log.warn("Sonarr command returned non-success status: {}", response.getStatusCode());
+                return false;
+            }
+
+        } catch (Exception e) {
+            log.error("Error triggering episode search for IDs {}: {}", episodeIds, e.getMessage(), e);
+            return false;
         }
     }
 }
