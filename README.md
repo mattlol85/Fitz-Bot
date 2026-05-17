@@ -14,7 +14,7 @@ A Discord bot built with Java and Spring Boot that tracks voice channel joins an
 - 🔧 **REST API Management** - Full bot control via HTTP endpoints
 - 📊 **Reliable Statistics** - Robust data persistence with JSON serialization and MongoDB-ready schema
 - 🎬 **Media Download Integration** - Search and download movies via Radarr integration
-- 📺 **TV Show Downloads** - Search and download TV shows via Sonarr with flexible season selection
+- 📺 **TV Show Downloads** - Search and download TV shows via Sonarr with flexible season selection or individual episode targeting
 
 ## Tech Stack
 
@@ -83,8 +83,33 @@ Search and download movies or TV shows from your Radarr/Sonarr instance.
 - Select between Movies or TV Shows
 - Search by title
 - Select from up to 5 results
-- For TV shows: Choose specific seasons or all seasons
-- **Example**: `/joenet download` → Select "Movies" → Enter "Breaking Bad" → Select result
+- For TV shows: Choose specific seasons, all seasons, or **a single episode**
+- **Example**: `/joenet download` → Select "Movies" → Enter "Wicked" → Select result
+
+##### UI Flow
+
+```mermaid
+flowchart TD
+    A(["/joenet download"]) --> B["🎬 Movies  |  📺 TV Shows"]
+
+    B -->|"🎬 Movies"| C["Modal: Enter movie title"]
+    C --> D["Select menu: up to 5 results"]
+    D --> E["✅ Movie added to Radarr queue"]
+
+    B -->|"📺 TV Shows"| F["Modal: Enter TV show title"]
+    F --> G["Select menu: up to 5 results"]
+    G --> H["Select menu: seasons\n─────────────────\n☑ All Seasons\n☑ Season 1  ☑ Season 2 …\n─────────────────\n🎯 Specific Episode"]
+
+    H -->|"Season selection"| I["✅ Series added to Sonarr queue\n(selected seasons monitored)"]
+
+    H -->|"🎯 Specific Episode"| J["Select menu: choose season"]
+    J -->|"Series not in library"| K["❌ Add the series first\nvia seasons option"]
+    J -->|"Series in library"| L["Select menu: episodes\n✅ = downloaded  ⬇️ = missing\n(up to 25 per season)"]
+    L --> M["✅ Sonarr EpisodeSearch triggered\n(re-downloads missing episode)"]
+```
+
+#### `/joenet status`
+View the current Radarr and Sonarr download queues, including progress percentages and ETAs.
 
 ### REST API Endpoints
 
@@ -138,6 +163,7 @@ joenet.sonarr.root-folder-path=${JOENET_SONARR_ROOT_FOLDER_PATH:P:\\\\Plex\\\\TV
 - **Movie Downloads**: Search movies via Radarr API by title (TMDB lookup)
 - **TV Show Downloads**: Search series via Sonarr API by title (TVDB lookup)
 - **Flexible Season Selection**: Download all seasons, specific seasons, or multiple seasons
+- **Individual Episode Download**: Pick a single episode from any season already in your Sonarr library — useful for re-triggering missed downloads
 - **Interactive Discord UI**: Button-driven interface with dropdown menus
 - **Error Handling**: Graceful handling of duplicate media and connection errors
 
