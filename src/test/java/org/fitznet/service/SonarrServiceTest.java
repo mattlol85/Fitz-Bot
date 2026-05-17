@@ -1,8 +1,8 @@
 package org.fitznet.service;
 
 import org.fitznet.dto.sonarr.Season;
-import org.fitznet.dto.sonarr.SeriesDownloadRequestDto;
 import org.fitznet.dto.sonarr.SeriesSearchResponseDto;
+import org.fitznet.dto.sonarr.SonarrQueueItemDto;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.InjectMocks;
@@ -293,6 +293,77 @@ class SonarrServiceTest {
             array[i] = series;
         }
         return array;
+    }
+
+    // ── getQueueDetails tests ───────────────────────────────────────────────────
+
+    @Test
+    void testGetQueueDetails_Success() {
+        SonarrQueueItemDto[] mockResponse = {
+                createQueueItem("Breaking Bad S01E01", "downloading", 500_000.0, 200_000.0),
+                createQueueItem("Better Call Saul S06E03", "queued", 400_000.0, 400_000.0)
+        };
+        ResponseEntity<SonarrQueueItemDto[]> responseEntity =
+                new ResponseEntity<>(mockResponse, HttpStatus.OK);
+
+        when(restTemplate.exchange(anyString(), eq(HttpMethod.GET), any(HttpEntity.class),
+                eq(SonarrQueueItemDto[].class))).thenReturn(responseEntity);
+
+        List<SonarrQueueItemDto> results = sonarrService.getQueueDetails();
+
+        assertNotNull(results);
+        assertEquals(2, results.size());
+        assertEquals("Breaking Bad S01E01", results.get(0).getTitle());
+        assertEquals("downloading", results.get(0).getStatus());
+        assertEquals(500_000.0, results.get(0).getSize());
+        assertEquals(200_000.0, results.get(0).getSizeleft());
+    }
+
+    @Test
+    void testGetQueueDetails_EmptyQueue() {
+        SonarrQueueItemDto[] mockResponse = new SonarrQueueItemDto[0];
+        ResponseEntity<SonarrQueueItemDto[]> responseEntity =
+                new ResponseEntity<>(mockResponse, HttpStatus.OK);
+
+        when(restTemplate.exchange(anyString(), eq(HttpMethod.GET), any(HttpEntity.class),
+                eq(SonarrQueueItemDto[].class))).thenReturn(responseEntity);
+
+        List<SonarrQueueItemDto> results = sonarrService.getQueueDetails();
+
+        assertNotNull(results);
+        assertTrue(results.isEmpty());
+    }
+
+    @Test
+    void testGetQueueDetails_NullBody() {
+        ResponseEntity<SonarrQueueItemDto[]> responseEntity =
+                new ResponseEntity<>(null, HttpStatus.OK);
+
+        when(restTemplate.exchange(anyString(), eq(HttpMethod.GET), any(HttpEntity.class),
+                eq(SonarrQueueItemDto[].class))).thenReturn(responseEntity);
+
+        List<SonarrQueueItemDto> results = sonarrService.getQueueDetails();
+
+        assertNotNull(results);
+        assertTrue(results.isEmpty());
+    }
+
+    @Test
+    void testGetQueueDetails_ExceptionIsPropagated() {
+        when(restTemplate.exchange(anyString(), eq(HttpMethod.GET), any(HttpEntity.class),
+                eq(SonarrQueueItemDto[].class))).thenThrow(new RuntimeException("Sonarr is down"));
+
+        assertThrows(RuntimeException.class, () -> sonarrService.getQueueDetails());
+    }
+
+    private SonarrQueueItemDto createQueueItem(String title, String status, Double size, Double sizeleft) {
+        SonarrQueueItemDto dto = new SonarrQueueItemDto();
+        dto.setTitle(title);
+        dto.setStatus(status);
+        dto.setTrackedDownloadStatus("ok");
+        dto.setSize(size);
+        dto.setSizeleft(sizeleft);
+        return dto;
     }
 }
 
