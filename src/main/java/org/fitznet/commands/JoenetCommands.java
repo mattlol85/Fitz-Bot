@@ -17,9 +17,11 @@ import net.dv8tion.jda.api.interactions.modals.Modal;
 import net.dv8tion.jda.api.EmbedBuilder;
 import org.fitznet.dto.radarr.MovieSearchResponseDto;
 import org.fitznet.dto.radarr.RadarrQueueItemDto;
+import org.fitznet.dto.sonarr.EpisodeDto;
 import org.fitznet.dto.sonarr.Season;
 import org.fitznet.dto.sonarr.SeriesSearchResponseDto;
 import org.fitznet.dto.sonarr.SonarrQueueItemDto;
+import org.fitznet.dto.sonarr.SonarrSeriesDto;
 
 import java.awt.Color;
 import java.time.OffsetDateTime;
@@ -30,6 +32,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 import java.util.stream.Collectors;
 
@@ -265,6 +268,8 @@ public class JoenetCommands extends ListenerAdapter {
                 handleMoviesButton(event);
             } else if ("joenet:tv".equals(buttonId)) {
                 handleTvButton(event);
+            } else if (buttonId.startsWith("joenet:specificepisode:")) {
+                handleSpecificEpisodeButton(event);
             }
         } catch (Exception e) {
             log.error("Error handling button interaction: {}", buttonId, e);
@@ -463,6 +468,10 @@ public class JoenetCommands extends ListenerAdapter {
                 handleSeriesSelection(event);
             } else if (selectId.startsWith("joenet:seasons:")) {
                 handleSeasonSelection(event);
+            } else if (selectId.startsWith("joenet:episodeseason:")) {
+                handleEpisodeSeasonSelection(event);
+            } else if (selectId.startsWith("joenet:episodes:")) {
+                handleEpisodeSelection(event);
             }
         } catch (Exception e) {
             log.error("Error handling select interaction: {}", selectId, e);
@@ -575,7 +584,13 @@ public class JoenetCommands extends ListenerAdapter {
 
         event.getHook().editOriginal(String.format("**%s** has %d season(s). Select which seasons to download:",
                 seriesTitle, seasons.size()))
-                .setActionRow(menuBuilder.build())
+                .setComponents(
+                        net.dv8tion.jda.api.interactions.components.ActionRow.of(menuBuilder.build()),
+                        net.dv8tion.jda.api.interactions.components.ActionRow.of(
+                                Button.secondary(buildSpecificEpisodeButtonId(tvdbId, seriesTitle),
+                                        "🎯 Specific Episode")
+                        )
+                )
                 .queue();
     }
 
@@ -652,6 +667,214 @@ public class JoenetCommands extends ListenerAdapter {
                             "The show may already exist in your library, or there was an error communicating with Sonarr.", seriesTitle)
             ).queue();
         }
+    }
+
+    // ── Specific Episode flow ────────────────────────────────────────────────
+
+    /**
+     * Handles the "🎯 Specific Episode" button click.
+     * Shows a season-picker select menu so the user can choose which season to browse episodes from.
+     * Component ID format: joenet:specificepisode:{tvdbId}:{seriesTitle}
+     */
+    private void handleSpecificEpisodeButton(ButtonInteractionEvent event) {
+        String buttonId = event.getComponentId();
+        // format: joenet:specificepisode:{tvdbId}:{seriesTitle}
+        String[] parts = buttonId.split(":", 4);
+        if (parts.length != 4) {
+            event.reply("❌ Invalid button state.").setEphemeral(true).queue();
+            return;
+        }
+
+        int tvdbId;
+        try {
+            tvdbId = Integer.parseInt(parts[2]);
+        } catch (NumberFormatException e) {
+            event.reply("❌ Invalid TV show ID.").setEphemeral(true).queue();
+            return;
+        }
+        String seriesTitle = parts[3];
+
+        event.deferReply(true).queue();
+
+        // We need the season list — re-use the series lookup
+        List<SeriesSearchResponseDto> results = sonarrService.searchSeries(seriesTitle);
+        SeriesSearchResponseDto series = results.stream()
+                .filter(s -> s.getTvdbId() != null && s.getTvdbId().equals(tvdbId))
+                .findFirst()
+                .orElse(null);
+
+        if (series == null || series.getSeasons() == null || series.getSeasons().isEmpty()) {
+            event.getHook().editOriginal("❌ Could not retrieve season information for this show.").queue();
+            return;
+        }
+
+        List<Season> seasons = series.getSeasons().stream()
+                .filter(s -> s.getSeasonNumber() > 0)
+                .collect(Collectors.toList());
+
+        if (seasons.isEmpty()) {
+            event.getHook().editOriginal("❌ No seasons available for this show.").queue();
+            return;
+        }
+
+        // Build a season-picker select menu (single-select)
+        StringSelectMenu.Builder menuBuilder = StringSelectMenu
+                .create("joenet:episodeseason:" + tvdbId + ":" + truncateForId(seriesTitle))
+                .setPlaceholder("Select a season to browse episodes")
+                .setMinValues(1)
+                .setMaxValues(1);
+
+        for (Season season : seasons.stream().limit(25).collect(Collectors.toList())) {
+            menuBuilder.addOption("Season " + season.getSeasonNumber(),
+                    String.valueOf(season.getSeasonNumber()));
+        }
+
+        event.getHook().editOriginal(
+                        String.format("Which season of **%s** would you like to browse episodes for?", seriesTitle))
+                .setActionRow(menuBuilder.build())
+                .queue();
+    }
+
+    /**
+     * Handles the season selection for the specific-episode flow.
+     * Looks up the series in the Sonarr library, fetches its episodes for the chosen season,
+     * and presents them as a select menu.
+     * Component ID format: joenet:episodeseason:{tvdbId}:{seriesTitle}
+     */
+    private void handleEpisodeSeasonSelection(StringSelectInteractionEvent event) {
+        String selectId = event.getComponentId();
+        // format: joenet:episodeseason:{tvdbId}:{seriesTitle}
+        String[] parts = selectId.split(":", 4);
+        if (parts.length != 4) {
+            event.reply("❌ Invalid selection.").setEphemeral(true).queue();
+            return;
+        }
+
+        int tvdbId;
+        int seasonNumber;
+        try {
+            tvdbId = Integer.parseInt(parts[2]);
+            seasonNumber = Integer.parseInt(event.getValues().get(0));
+        } catch (NumberFormatException e) {
+            event.reply("❌ Invalid ID.").setEphemeral(true).queue();
+            return;
+        }
+        String seriesTitle = parts[3];
+
+        event.deferReply(true).queue();
+
+        // Look up the series in the Sonarr library using TVDB ID
+        SonarrSeriesDto librarySeries = sonarrService.getSeriesByTvdbId(tvdbId);
+        if (librarySeries == null) {
+            event.getHook().editOriginal(
+                    String.format("❌ **%s** is not in your Sonarr library yet.\n" +
+                            "Please add it first using the **seasons option**, then use " +
+                            "🎯 Specific Episode to re-trigger individual downloads.", seriesTitle)
+            ).queue();
+            return;
+        }
+
+        // Fetch episodes for the chosen season
+        List<EpisodeDto> episodes =
+                sonarrService.getEpisodes(librarySeries.getId(), seasonNumber);
+
+        if (episodes.isEmpty()) {
+            event.getHook().editOriginal(
+                    String.format("❌ No episodes found for **%s** Season %d. " +
+                            "The season may not have aired yet.", seriesTitle, seasonNumber)
+            ).queue();
+            return;
+        }
+
+        // Cap at 25 (Discord select menu limit)
+        boolean truncated = episodes.size() > 25;
+        List<EpisodeDto> displayEpisodes =
+                truncated ? episodes.subList(0, 25) : episodes;
+
+        // Build episode select menu (single-select)
+        // Component ID: joenet:episodes:{sonarrSeriesId}
+        StringSelectMenu.Builder menuBuilder = StringSelectMenu
+                .create("joenet:episodes:" + librarySeries.getId())
+                .setPlaceholder("Select an episode to download")
+                .setMinValues(1)
+                .setMaxValues(1);
+
+        for (EpisodeDto ep : displayEpisodes) {
+            String label = String.format("E%02d – %s",
+                    ep.getEpisodeNumber() != null ? ep.getEpisodeNumber() : 0,
+                    ep.getTitle() != null ? ep.getTitle() : "Unknown");
+            if (label.length() > 100) label = label.substring(0, 97) + "...";
+
+            String description = ep.isHasFile() ? "✅ Already downloaded" : "⬇️ Not yet downloaded";
+            String value = String.valueOf(ep.getId());
+
+            menuBuilder.addOption(label, value, description);
+        }
+
+        String prompt = String.format("**%s** — Season %d (%d episode%s):%s",
+                seriesTitle, seasonNumber, displayEpisodes.size(),
+                displayEpisodes.size() == 1 ? "" : "s",
+                truncated ? "\n⚠️ Showing first 25 episodes only." : "");
+
+        event.getHook().editOriginal(prompt)
+                .setActionRow(menuBuilder.build())
+                .queue();
+    }
+
+    /**
+     * Handles the episode selection and triggers an EpisodeSearch command in Sonarr.
+     * Component ID format: joenet:episodes:{sonarrSeriesId}
+     */
+    private void handleEpisodeSelection(StringSelectInteractionEvent event) {
+        String selectId = event.getComponentId();
+        // format: joenet:episodes:{sonarrSeriesId}
+        String[] parts = selectId.split(":", 3);
+        if (parts.length != 3) {
+            event.reply("❌ Invalid selection.").setEphemeral(true).queue();
+            return;
+        }
+
+        int episodeId;
+        try {
+            episodeId = Integer.parseInt(event.getValues().get(0));
+        } catch (NumberFormatException e) {
+            event.reply("❌ Invalid episode ID.").setEphemeral(true).queue();
+            return;
+        }
+
+        event.deferReply(true).queue();
+
+        boolean success = sonarrService.triggerEpisodeSearch(Collections.singletonList(episodeId));
+
+        if (success) {
+            event.getHook().editOriginal(
+                    "✅ Episode search triggered! Sonarr will attempt to download the episode now."
+            ).queue();
+        } else {
+            event.getHook().editOriginal(
+                    "❌ Failed to trigger episode search. " +
+                            "Please check your Sonarr connection or try again later."
+            ).queue();
+        }
+    }
+
+    // ── Helpers ─────────────────────────────────────────────────────────────
+
+    /**
+     * Builds the component ID for the "Specific Episode" button.
+     * Truncates the title to ensure the total ID stays within Discord's 100-character limit.
+     */
+    String buildSpecificEpisodeButtonId(int tvdbId, String seriesTitle) {
+        // "joenet:specificepisode:" + tvdbId (max 10 chars) + ":" = 34 chars prefix max
+        // leaving 66 chars for the title
+        return "joenet:specificepisode:" + tvdbId + ":" + truncateForId(seriesTitle);
+    }
+
+    /**
+     * Truncates a string to 60 characters so it fits safely inside a component ID.
+     */
+    private String truncateForId(String value) {
+        return value != null && value.length() > 60 ? value.substring(0, 60) : value;
     }
 }
 
