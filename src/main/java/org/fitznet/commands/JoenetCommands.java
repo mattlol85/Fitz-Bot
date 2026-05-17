@@ -14,9 +14,16 @@ import net.dv8tion.jda.api.interactions.components.selections.StringSelectMenu;
 import net.dv8tion.jda.api.interactions.components.text.TextInput;
 import net.dv8tion.jda.api.interactions.components.text.TextInputStyle;
 import net.dv8tion.jda.api.interactions.modals.Modal;
+import net.dv8tion.jda.api.EmbedBuilder;
 import org.fitznet.dto.radarr.MovieSearchResponseDto;
+import org.fitznet.dto.radarr.RadarrQueueItemDto;
 import org.fitznet.dto.sonarr.Season;
 import org.fitznet.dto.sonarr.SeriesSearchResponseDto;
+import org.fitznet.dto.sonarr.SonarrQueueItemDto;
+
+import java.awt.Color;
+import java.time.OffsetDateTime;
+import java.time.Duration;
 import org.fitznet.service.RadarrService;
 import org.fitznet.service.SonarrService;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -46,7 +53,8 @@ public class JoenetCommands extends ListenerAdapter {
         return new SlashCommandData[]{
                 Commands.slash("joenet", "Download movies or TV shows from JoeNet")
                         .addSubcommands(
-                                new SubcommandData("download", "Search and download movies or TV shows")
+                                new SubcommandData("download", "Search and download movies or TV shows"),
+                                new SubcommandData("status", "View the current JoeNet download queue")
                         )
         };
     }
@@ -74,6 +82,8 @@ public class JoenetCommands extends ListenerAdapter {
             String subcommand = event.getSubcommandName();
             if ("download".equals(subcommand)) {
                 handleDownloadCommand(event);
+            } else if ("status".equals(subcommand)) {
+                handleStatusCommand(event);
             } else {
                 event.getHook().editOriginal("❌ Unknown subcommand").queue();
             }
@@ -91,6 +101,142 @@ public class JoenetCommands extends ListenerAdapter {
                 log.error("Failed to send error response", replyError);
             }
         }
+    }
+
+    private void handleStatusCommand(SlashCommandInteractionEvent event) {
+        log.info("Processing /joenet status command for user: {}", event.getUser().getName());
+
+        List<RadarrQueueItemDto> radarrItems = null;
+        List<SonarrQueueItemDto> sonarrItems = null;
+        boolean radarrError = false;
+        boolean sonarrError = false;
+
+        try {
+            radarrItems = radarrService.getQueueDetails();
+        } catch (Exception e) {
+            log.warn("Failed to fetch Radarr queue details: {}", e.getMessage());
+            radarrError = true;
+        }
+
+        try {
+            sonarrItems = sonarrService.getQueueDetails();
+        } catch (Exception e) {
+            log.warn("Failed to fetch Sonarr queue details: {}", e.getMessage());
+            sonarrError = true;
+        }
+
+        EmbedBuilder embed = new EmbedBuilder();
+        embed.setTitle("JoeNet Download Queue");
+        embed.setColor(Color.decode("#3498DB"));
+
+        String radarrField = formatQueueSection(radarrItems, radarrError);
+        String sonarrField = formatQueueSection(sonarrItems, sonarrError);
+
+        embed.addField("🎬 Radarr (Movies)", radarrField, false);
+        embed.addField("📺 Sonarr (TV Shows)", sonarrField, false);
+        embed.setFooter("JoeNet Download Status");
+
+        event.getHook().editOriginalEmbeds(embed.build()).queue();
+    }
+
+    private String formatQueueSection(List<?> items, boolean error) {
+        if (error) {
+            return "⚠️ Service unavailable";
+        }
+        if (items == null || items.isEmpty()) {
+            return "✅ Queue is empty";
+        }
+
+        int cap = Math.min(items.size(), 10);
+        StringBuilder sb = new StringBuilder();
+
+        for (int i = 0; i < cap; i++) {
+            Object rawItem = items.get(i);
+            String title;
+            String status;
+            String trackedStatus;
+            Double size;
+            Double sizeleft;
+            String eta;
+
+            if (rawItem instanceof RadarrQueueItemDto item) {
+                title = item.getTitle();
+                status = item.getStatus();
+                trackedStatus = item.getTrackedDownloadStatus();
+                size = item.getSize();
+                sizeleft = item.getSizeleft();
+                eta = item.getEstimatedCompletionTime();
+            } else if (rawItem instanceof SonarrQueueItemDto item) {
+                title = item.getTitle();
+                status = item.getStatus();
+                trackedStatus = item.getTrackedDownloadStatus();
+                size = item.getSize();
+                sizeleft = item.getSizeleft();
+                eta = item.getEstimatedCompletionTime();
+            } else {
+                continue;
+            }
+
+            String displayTitle = (title != null && title.length() > 40)
+                    ? title.substring(0, 37) + "..."
+                    : (title != null ? title : "Unknown");
+
+            String statusEmoji = getStatusEmoji(status, trackedStatus);
+
+            sb.append("• **").append(displayTitle).append("** — ").append(statusEmoji).append(" ").append(capitalise(status));
+
+            // Show download progress percentage
+            if (size != null && sizeleft != null && size > 0) {
+                double progress = (size - sizeleft) / size * 100.0;
+                sb.append(String.format(" (%.0f%%)", progress));
+            }
+
+            // Show ETA
+            if (eta != null && !eta.isEmpty()) {
+                try {
+                    OffsetDateTime etaTime = OffsetDateTime.parse(eta);
+                    Duration remaining = Duration.between(OffsetDateTime.now(), etaTime);
+                    if (!remaining.isNegative()) {
+                        long hours = remaining.toHours();
+                        long minutes = remaining.toMinutesPart();
+                        if (hours > 0) {
+                            sb.append(String.format(" — %dh %dm left", hours, minutes));
+                        } else {
+                            sb.append(String.format(" — %dm left", minutes));
+                        }
+                    }
+                } catch (Exception ignored) {
+                    // ETA not parseable — skip it
+                }
+            }
+
+            sb.append("\n");
+        }
+
+        if (items.size() > cap) {
+            sb.append("*…and ").append(items.size() - cap).append(" more*");
+        }
+
+        String result = sb.toString().trim();
+        return result.isEmpty() ? "✅ Queue is empty" : result;
+    }
+
+    private String getStatusEmoji(String status, String trackedStatus) {
+        if (status == null) return "🔄";
+        return switch (status.toLowerCase()) {
+            case "downloading" -> "⬇️";
+            case "queued"      -> "⏳";
+            case "completed"   -> "✅";
+            case "failed"      -> "❌";
+            case "paused"      -> "⏸";
+            case "warning"     -> "⚠️";
+            default            -> "🔄";
+        };
+    }
+
+    private String capitalise(String s) {
+        if (s == null || s.isEmpty()) return "";
+        return Character.toUpperCase(s.charAt(0)) + s.substring(1).toLowerCase();
     }
 
     private void handleDownloadCommand(SlashCommandInteractionEvent event) {

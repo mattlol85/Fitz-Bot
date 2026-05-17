@@ -3,6 +3,7 @@ package org.fitznet.service;
 import lombok.extern.slf4j.Slf4j;
 import org.fitznet.dto.radarr.MovieDownloadRequestDto;
 import org.fitznet.dto.radarr.MovieSearchResponseDto;
+import org.fitznet.dto.radarr.RadarrQueueItemDto;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpEntity;
@@ -157,6 +158,42 @@ public class RadarrService {
             }
 
             return false;
+        }
+    }
+
+    /**
+     * Retrieves the current download queue details from Radarr.
+     *
+     * @return list of queue items, or empty list on error
+     */
+    public List<RadarrQueueItemDto> getQueueDetails() {
+        try {
+            String url = baseUrl + "/queue/details";
+            log.info("Fetching Radarr queue details");
+
+            HttpHeaders headers = new HttpHeaders();
+            headers.set("X-Api-Key", apiKey);
+            HttpEntity<String> entity = new HttpEntity<>(headers);
+
+            ResponseEntity<RadarrQueueItemDto[]> response = restTemplate.exchange(
+                    url,
+                    HttpMethod.GET,
+                    entity,
+                    RadarrQueueItemDto[].class
+            );
+
+            if (response.getBody() == null) {
+                log.warn("Radarr queue/details returned null body");
+                return new ArrayList<>();
+            }
+
+            List<RadarrQueueItemDto> items = Arrays.asList(response.getBody());
+            log.info("Radarr queue has {} item(s)", items.size());
+            return items;
+
+        } catch (Exception e) {
+            log.error("Error fetching Radarr queue details: {}", e.getMessage(), e);
+            throw e;
         }
     }
 }

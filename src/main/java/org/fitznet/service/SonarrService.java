@@ -4,6 +4,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.fitznet.dto.sonarr.Season;
 import org.fitznet.dto.sonarr.SeriesDownloadRequestDto;
 import org.fitznet.dto.sonarr.SeriesSearchResponseDto;
+import org.fitznet.dto.sonarr.SonarrQueueItemDto;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpEntity;
@@ -165,6 +166,42 @@ public class SonarrService {
             }
 
             return false;
+        }
+    }
+
+    /**
+     * Retrieves the current download queue details from Sonarr.
+     *
+     * @return list of queue items, or empty list on error
+     */
+    public List<SonarrQueueItemDto> getQueueDetails() {
+        try {
+            String url = baseUrl + "/queue/details";
+            log.info("Fetching Sonarr queue details");
+
+            HttpHeaders headers = new HttpHeaders();
+            headers.set("X-Api-Key", apiKey);
+            HttpEntity<String> entity = new HttpEntity<>(headers);
+
+            ResponseEntity<SonarrQueueItemDto[]> response = restTemplate.exchange(
+                    url,
+                    HttpMethod.GET,
+                    entity,
+                    SonarrQueueItemDto[].class
+            );
+
+            if (response.getBody() == null) {
+                log.warn("Sonarr queue/details returned null body");
+                return new ArrayList<>();
+            }
+
+            List<SonarrQueueItemDto> items = Arrays.asList(response.getBody());
+            log.info("Sonarr queue has {} item(s)", items.size());
+            return items;
+
+        } catch (Exception e) {
+            log.error("Error fetching Sonarr queue details: {}", e.getMessage(), e);
+            throw e;
         }
     }
 }
