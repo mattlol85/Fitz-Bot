@@ -21,6 +21,9 @@ import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
 
+import org.mockito.ArgumentCaptor;
+
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.Mockito.*;
@@ -143,6 +146,47 @@ class JoenetCommandsStatusTest {
         verify(radarrService, times(1)).getQueueDetails();
         verify(sonarrService, times(1)).getQueueDetails();
         verify(hook, times(1)).editOriginalEmbeds(any(MessageEmbed.class));
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void testStatusCommand_CompletedItemsFilteredOut() {
+        List<RadarrQueueItemDto> radarrItems = Arrays.asList(
+                createRadarrItem("Completed Movie", "completed", 1_000_000.0, 0.0),
+                createRadarrItem("Downloading Movie", "downloading", 1_000_000.0, 400_000.0)
+        );
+        when(radarrService.getQueueDetails()).thenReturn(radarrItems);
+        when(sonarrService.getQueueDetails()).thenReturn(Collections.emptyList());
+
+        joenetCommands.onSlashCommandInteraction(event);
+
+        ArgumentCaptor<MessageEmbed> captor = ArgumentCaptor.forClass(MessageEmbed.class);
+        verify(hook).editOriginalEmbeds(captor.capture());
+        String radarrField = captor.getValue().getFields().get(0).getValue();
+        assertThat(radarrField).doesNotContain("Completed Movie");
+        assertThat(radarrField).contains("Downloading Movie");
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void testStatusCommand_AllCompletedShowsQueueEmpty() {
+        List<RadarrQueueItemDto> radarrItems = Arrays.asList(
+                createRadarrItem("Completed Movie A", "completed", 1_000_000.0, 0.0),
+                createRadarrItem("Completed Movie B", "COMPLETED", 800_000.0, 0.0)
+        );
+        List<SonarrQueueItemDto> sonarrItems = Arrays.asList(
+                createSonarrItem("Completed Show S01E01", "Completed", 500_000.0, 0.0)
+        );
+        when(radarrService.getQueueDetails()).thenReturn(radarrItems);
+        when(sonarrService.getQueueDetails()).thenReturn(sonarrItems);
+
+        joenetCommands.onSlashCommandInteraction(event);
+
+        ArgumentCaptor<MessageEmbed> captor = ArgumentCaptor.forClass(MessageEmbed.class);
+        verify(hook).editOriginalEmbeds(captor.capture());
+        MessageEmbed embed = captor.getValue();
+        assertThat(embed.getFields().get(0).getValue()).isEqualTo("✅ Queue is empty");
+        assertThat(embed.getFields().get(1).getValue()).isEqualTo("✅ Queue is empty");
     }
 
     // ── helpers ─────────────────────────────────────────────────────────────────
