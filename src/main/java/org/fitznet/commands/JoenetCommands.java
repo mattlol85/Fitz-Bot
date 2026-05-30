@@ -150,11 +150,23 @@ public class JoenetCommands extends ListenerAdapter {
             return "✅ Queue is empty";
         }
 
-        int cap = Math.min(items.size(), 10);
+        List<?> activeItems = items.stream()
+                .filter(item -> {
+                    String s = item instanceof RadarrQueueItemDto r ? r.getStatus()
+                             : item instanceof SonarrQueueItemDto sq ? sq.getStatus() : null;
+                    return s == null || !s.equalsIgnoreCase("completed");
+                })
+                .toList();
+
+        if (activeItems.isEmpty()) {
+            return "✅ Queue is empty";
+        }
+
+        int cap = Math.min(activeItems.size(), 10);
         StringBuilder sb = new StringBuilder();
 
         for (int i = 0; i < cap; i++) {
-            Object rawItem = items.get(i);
+            Object rawItem = activeItems.get(i);
             String title;
             String status;
             String trackedStatus;
@@ -216,8 +228,8 @@ public class JoenetCommands extends ListenerAdapter {
             sb.append("\n");
         }
 
-        if (items.size() > cap) {
-            sb.append("*…and ").append(items.size() - cap).append(" more*");
+        if (activeItems.size() > cap) {
+            sb.append("*…and ").append(activeItems.size() - cap).append(" more*");
         }
 
         String result = sb.toString().trim();
