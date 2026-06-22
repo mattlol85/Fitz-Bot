@@ -27,6 +27,12 @@ public class GuildConfig {
     private Long botChannelId;
 
     /**
+     * Discord role ID permitted to use the /whitelist command.
+     * If null, only administrators may add players to the Minecraft whitelist.
+     */
+    private Long whitelistRoleId;
+
+    /**
      * Custom milestone thresholds for this guild.
      * If null, default milestones will be used.
      */

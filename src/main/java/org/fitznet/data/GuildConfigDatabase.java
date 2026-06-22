@@ -128,6 +128,30 @@ public class GuildConfigDatabase {
     }
 
     /**
+     * Gets the role ID permitted to use the /whitelist command for a guild.
+     *
+     * @param guildId the Discord guild ID
+     * @return the whitelist role ID, or null if not configured
+     */
+    public Long getWhitelistRoleId(long guildId) {
+        GuildConfig config = guildConfigs.get(guildId);
+        return config != null ? config.getWhitelistRoleId() : null;
+    }
+
+    /**
+     * Sets the role ID permitted to use the /whitelist command for a guild.
+     *
+     * @param guildId the Discord guild ID
+     * @param roleId the Discord role ID
+     */
+    public void setWhitelistRoleId(long guildId, long roleId) {
+        GuildConfig config = guildConfigs.computeIfAbsent(guildId, k -> new GuildConfig());
+        config.setWhitelistRoleId(roleId);
+        saveConfigs();
+        log.info("Set whitelist role for guild {} to {}", guildId, roleId);
+    }
+
+    /**
      * Gets the milestone thresholds for a specific guild.
      *
      * @param guildId the Discord guild ID
