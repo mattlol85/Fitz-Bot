@@ -8,6 +8,7 @@ import net.dv8tion.jda.api.OnlineStatus;
 import net.dv8tion.jda.api.entities.Activity;
 import org.fitznet.commands.ConfigCommands;
 import org.fitznet.commands.JoenetCommands;
+import org.fitznet.commands.WhitelistCommands;
 import org.fitznet.listener.LoginListener;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
@@ -30,6 +31,9 @@ public class BotService {
 
     @Autowired
     private JoenetCommands joenetCommands;
+
+    @Autowired
+    private WhitelistCommands whitelistCommands;
 
     /**
      * -- GETTER --
@@ -61,6 +65,7 @@ public class BotService {
             jda.addEventListener(new LoginListener());
             jda.addEventListener(new ConfigCommands());
             jda.addEventListener(joenetCommands);
+            jda.addEventListener(whitelistCommands);
 
             // Small delay to ensure guild cache is fully populated
             Thread.sleep(2000);
@@ -73,6 +78,7 @@ public class BotService {
             // Combine commands from both handlers
             var allCommands = new java.util.ArrayList<>(java.util.Arrays.asList(ConfigCommands.getCommands()));
             allCommands.addAll(java.util.Arrays.asList(JoenetCommands.getCommands()));
+            allCommands.addAll(java.util.Arrays.asList(WhitelistCommands.getCommands()));
 
             for (var guild : jda.getGuilds()) {
                 guild.updateCommands()
@@ -179,6 +185,7 @@ public class BotService {
             // Combine commands from both handlers
             var allCommands = new java.util.ArrayList<>(java.util.Arrays.asList(ConfigCommands.getCommands()));
             allCommands.addAll(java.util.Arrays.asList(joenetCommands.getCommands()));
+            allCommands.addAll(java.util.Arrays.asList(WhitelistCommands.getCommands()));
 
             var guild = jda.getGuildById(guildId);
             if (guild == null) {

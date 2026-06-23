@@ -15,6 +15,7 @@ A Discord bot built with Java and Spring Boot that tracks voice channel joins an
 - 📊 **Reliable Statistics** - Robust data persistence with JSON serialization and MongoDB-ready schema
 - 🎬 **Media Download Integration** - Search and download movies via Radarr integration
 - 📺 **TV Show Downloads** - Search and download TV shows via Sonarr with flexible season selection or individual episode targeting
+- ⛏️ **Minecraft Whitelist** - Role-gated `/whitelist` command adds players to the Minecraft server over RCON
 
 ## Tech Stack
 
@@ -111,6 +112,19 @@ flowchart TD
 #### `/joenet status`
 View the current Radarr and Sonarr download queues, including progress percentages and ETAs.
 
+#### `/whitelist <username>`
+Adds a player to the Minecraft server whitelist over RCON.
+- **Access**: gated to members holding the role configured via `/setwhitelistrole` (administrators are always allowed). If no role is set, only admins can use it.
+- **Validation**: the username must match Minecraft's rules (`3-16` characters, letters/digits/underscores) — this also prevents RCON command injection.
+- The server's response (e.g. *"Added Steve to the whitelist"*) is shown back ephemerally.
+- **Example**: `/whitelist Steve`
+
+> Crawlers/bots are kept out by the Minecraft server itself: set `white-list=true` and `online-mode=true` in `server.properties`. This command only manages who is allowed in.
+
+#### `/setwhitelistrole <role>`
+Sets which Discord role may use `/whitelist`. Requires the **Manage Server** permission.
+- **Example**: `/setwhitelistrole @Trusted`
+
 ### REST API Endpoints
 
 The bot provides HTTP endpoints for management:
@@ -166,6 +180,30 @@ joenet.sonarr.root-folder-path=${JOENET_SONARR_ROOT_FOLDER_PATH:P:\\\\Plex\\\\TV
 - **Individual Episode Download**: Pick a single episode from any season already in your Sonarr library — useful for re-triggering missed downloads
 - **Interactive Discord UI**: Button-driven interface with dropdown menus
 - **Error Handling**: Graceful handling of duplicate media and connection errors
+
+### Minecraft RCON Configuration
+The `/whitelist` command talks to the Minecraft server over RCON. Configure the endpoint in `application.properties`:
+
+```properties
+# Minecraft RCON (must match server.properties on the MC server)
+minecraft.rcon.host=${MINECRAFT_RCON_HOST:your-mc-host-here}
+minecraft.rcon.port=${MINECRAFT_RCON_PORT:25575}
+minecraft.rcon.password=${MINECRAFT_RCON_PASSWORD:changeme}
+```
+
+On the Minecraft server, enable RCON and lock the server down in `server.properties`, then restart it:
+
+```properties
+white-list=true
+enforce-whitelist=true
+online-mode=true
+enable-rcon=true
+rcon.port=25575
+rcon.password=<strong-secret>
+```
+
+- `white-list` + `online-mode` keep anonymous/cracked crawler clients out.
+- `enable-rcon` + `rcon.password` let Fitz-Bot manage the whitelist remotely.
 
 ### As Of Date Tracking
 The bot automatically tracks when voice channel monitoring begins for each server:
