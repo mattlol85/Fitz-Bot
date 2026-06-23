@@ -250,6 +250,9 @@ jobs:
         # Add and commit the version change
         git add build.gradle
         git commit -m "chore: bump version to $NEW_VERSION [skip ci]"
+        
+        # Pull with rebase to incorporate any commits that landed since checkout
+        git pull --rebase origin ${{ github.ref_name }} || { echo "ERROR: Rebase failed due to conflicts. The rebase has been aborted. Please resolve conflicts in a separate commit and re-trigger this workflow." >&2; git rebase --abort; exit 1; }
         git push origin ${{ github.ref_name }}
         
         echo "✅ Committed version update"
