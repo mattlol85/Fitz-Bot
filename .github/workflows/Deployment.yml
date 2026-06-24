@@ -215,6 +215,8 @@ jobs:
             --joenet.radarr.apikey='${{ secrets.JOENET_RADARR_APIKEY }}' \
             --joenet.sonarr.port='${{ secrets.JOENET_SONARR_PORT }}' \
             --joenet.sonarr.apikey='${{ secrets.JOENET_SONARR_APIKEY }}' \
+            --minecraft.rcon.host='${{ secrets.MINECRAFT_RCON_HOST }}' \
+            --minecraft.rcon.password='${{ secrets.MINECRAFT_RCON_PASSWORD }}' \
             --spring.config.additional-location=classpath:/,file:config/application.properties \
             > logs/fitz-bot.log 2>&1 &
           APP_PID=$!; echo "Started with PID: $APP_PID"; sleep 6;
