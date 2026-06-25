@@ -121,11 +121,19 @@ jobs:
             echo 'ℹ️  fitz-bot service not running'
           fi
           
-          # Kill any running Java processes for the bot (backup method)
-          if pgrep -f 'fitz.*jar' > /dev/null 2>&1; then
-            echo 'Killing existing bot processes...'
-            pkill -f 'fitz.*jar' 2>/dev/null || true
-            sleep 2
+          # Kill the running bot JVM. Match 'current.jar' to stay consistent with how
+          # the app is started ('java -jar current.jar') and health-checked. The old
+          # 'fitz.*jar' pattern never matched the running cmdline, so stale processes
+          # survived deploys and had to be killed by hand.
+          if pgrep -f 'current.jar' > /dev/null 2>&1; then
+            echo 'Stopping existing bot process (SIGTERM)...'
+            pkill -f 'current.jar' 2>/dev/null || true
+            sleep 5
+            if pgrep -f 'current.jar' > /dev/null 2>&1; then
+              echo 'Still alive after grace period, sending SIGKILL...'
+              pkill -9 -f 'current.jar' 2>/dev/null || true
+              sleep 1
+            fi
             echo '✅ Stopped existing processes'
           else
             echo 'ℹ️  No existing bot processes found'
