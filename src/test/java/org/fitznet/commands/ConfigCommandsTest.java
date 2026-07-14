@@ -270,6 +270,74 @@ class ConfigCommandsTest {
         verify(mockHook).editOriginal("ℹ️ No join counts found for any users in this server.");
     }
 
+    // ── Requester log channel ────────────────────────────────────────────────
+
+    @Test
+    void testGetRequesterLogChannel_NotConfigured() {
+        when(mockEvent.getName()).thenReturn("getrequesterlogchannel");
+
+        handleGetRequesterLogChannelTest(mockEvent, database);
+
+        verify(mockHook).editOriginal("ℹ️ No requester log channel is currently configured.\nUse `/setrequesterlogchannel` to set one!");
+    }
+
+    @Test
+    void testGetRequesterLogChannel_Configured() {
+        when(mockEvent.getName()).thenReturn("getrequesterlogchannel");
+
+        long channelId = 555555555L;
+        database.setRequesterLogChannelId(TEST_GUILD_ID, channelId);
+
+        net.dv8tion.jda.api.entities.channel.concrete.TextChannel mockChannel =
+                mock(net.dv8tion.jda.api.entities.channel.concrete.TextChannel.class);
+        when(mockGuild.getTextChannelById(channelId)).thenReturn(mockChannel);
+        when(mockChannel.getAsMention()).thenReturn("<#" + channelId + ">");
+
+        handleGetRequesterLogChannelTest(mockEvent, database);
+
+        verify(mockHook).editOriginal("ℹ️ Requester log channel is currently set to <#" + channelId + ">");
+    }
+
+    @Test
+    void testGetRequesterLogChannel_ConfiguredChannelDeleted() {
+        when(mockEvent.getName()).thenReturn("getrequesterlogchannel");
+
+        long channelId = 555555555L;
+        database.setRequesterLogChannelId(TEST_GUILD_ID, channelId);
+        when(mockGuild.getTextChannelById(channelId)).thenReturn(null);
+
+        handleGetRequesterLogChannelTest(mockEvent, database);
+
+        verify(mockHook).editOriginal("⚠️ Requester log channel was set to ID `" + channelId +
+                "` but that channel no longer exists.\nUse `/setrequesterlogchannel` to set a new one!");
+    }
+
+    /**
+     * Helper method that replicates the handleGetRequesterLogChannel logic for testing.
+     */
+    private void handleGetRequesterLogChannelTest(SlashCommandInteractionEvent event, GuildConfigDatabase configDatabase) {
+        try {
+            long guildId = Objects.requireNonNull(event.getGuild()).getIdLong();
+            Long channelId = configDatabase.getRequesterLogChannelId(guildId);
+
+            if (channelId == null) {
+                event.getHook().editOriginal("ℹ️ No requester log channel is currently configured.\nUse `/setrequesterlogchannel` to set one!").queue();
+                return;
+            }
+
+            net.dv8tion.jda.api.entities.channel.concrete.TextChannel channel = event.getGuild().getTextChannelById(channelId);
+            if (channel == null) {
+                event.getHook().editOriginal("⚠️ Requester log channel was set to ID `" + channelId +
+                        "` but that channel no longer exists.\nUse `/setrequesterlogchannel` to set a new one!").queue();
+                return;
+            }
+
+            event.getHook().editOriginal("ℹ️ Requester log channel is currently set to " + channel.getAsMention()).queue();
+        } catch (Exception e) {
+            event.getHook().editOriginal("❌ An error occurred while getting the requester log channel: " + e.getMessage()).queue();
+        }
+    }
+
     @Test
     void testCurrentCount_SingleUser() {
         // Arrange: Guild with one user having join counts

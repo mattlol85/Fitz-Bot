@@ -92,6 +92,32 @@ class GuildConfigDatabaseTest {
     }
 
     @Test
+    void testGetRequesterLogChannelIdForNonExistentGuild() {
+        assertNull(database.getRequesterLogChannelId(TEST_GUILD_ID),
+                "Non-existent guild should have no requester log channel");
+    }
+
+    @Test
+    void testSetAndGetRequesterLogChannelId() {
+        long channelId = 987654321L;
+        database.setRequesterLogChannelId(TEST_GUILD_ID, channelId);
+
+        assertEquals(channelId, database.getRequesterLogChannelId(TEST_GUILD_ID));
+    }
+
+    @Test
+    void testSetRequesterLogChannelIdIndependentFromBotChannel() {
+        long botChannelId = 111L;
+        long requesterLogChannelId = 222L;
+
+        database.setBotChannelId(TEST_GUILD_ID, botChannelId);
+        database.setRequesterLogChannelId(TEST_GUILD_ID, requesterLogChannelId);
+
+        assertEquals(botChannelId, database.getBotChannelId(TEST_GUILD_ID));
+        assertEquals(requesterLogChannelId, database.getRequesterLogChannelId(TEST_GUILD_ID));
+    }
+
+    @Test
     void testResetAllJoinCounts() {
         database.incrementUserJoinCount(TEST_GUILD_ID, TEST_USER_ID_1);
         database.incrementUserJoinCount(TEST_GUILD_ID, TEST_USER_ID_1);
