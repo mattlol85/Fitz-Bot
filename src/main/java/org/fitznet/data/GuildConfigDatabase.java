@@ -152,6 +152,30 @@ public class GuildConfigDatabase {
     }
 
     /**
+     * Gets the requester log channel ID for a specific guild.
+     *
+     * @param guildId the Discord guild ID
+     * @return the requester log channel ID, or null if not configured
+     */
+    public Long getRequesterLogChannelId(long guildId) {
+        GuildConfig config = guildConfigs.get(guildId);
+        return config != null ? config.getRequesterLogChannelId() : null;
+    }
+
+    /**
+     * Sets the requester log channel ID for a specific guild.
+     *
+     * @param guildId the Discord guild ID
+     * @param channelId the Discord channel ID
+     */
+    public void setRequesterLogChannelId(long guildId, long channelId) {
+        GuildConfig config = guildConfigs.computeIfAbsent(guildId, k -> new GuildConfig());
+        config.setRequesterLogChannelId(channelId);
+        saveConfigs();
+        log.info("Set requester log channel for guild {} to {}", guildId, channelId);
+    }
+
+    /**
      * Gets the milestone thresholds for a specific guild.
      *
      * @param guildId the Discord guild ID

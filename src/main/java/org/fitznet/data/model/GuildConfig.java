@@ -33,6 +33,12 @@ public class GuildConfig {
     private Long whitelistRoleId;
 
     /**
+     * Discord channel ID where requester log messages should be sent when a user
+     * successfully queues a movie or TV show via /joenet download.
+     */
+    private Long requesterLogChannelId;
+
+    /**
      * Custom milestone thresholds for this guild.
      * If null, default milestones will be used.
      */

@@ -26,6 +26,12 @@ import org.fitznet.dto.sonarr.SonarrSeriesDto;
 import java.awt.Color;
 import java.time.OffsetDateTime;
 import java.time.Duration;
+import java.time.LocalDateTime;
+import java.time.format.DateTimeFormatter;
+import net.dv8tion.jda.api.entities.Guild;
+import net.dv8tion.jda.api.entities.User;
+import net.dv8tion.jda.api.entities.channel.concrete.TextChannel;
+import org.fitznet.data.GuildConfigDatabase;
 import org.fitznet.service.RadarrService;
 import org.fitznet.service.SonarrService;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -48,6 +54,8 @@ public class JoenetCommands extends ListenerAdapter {
 
     @Autowired
     private SonarrService sonarrService;
+
+    private GuildConfigDatabase configDatabase = new GuildConfigDatabase();
 
     /**
      * Gets the slash command definitions.
@@ -519,6 +527,7 @@ public class JoenetCommands extends ListenerAdapter {
         boolean success = radarrService.downloadMovie(tmdbId, movieTitle);
 
         if (success) {
+            postRequesterLog(event.getGuild(), event.getUser(), movieTitle);
             event.getHook().editOriginal(
                     String.format("✅ Successfully added **%s** to the download queue!\n" +
                             "The movie will be downloaded automatically.", movieTitle)
@@ -669,6 +678,7 @@ public class JoenetCommands extends ListenerAdapter {
             String seasonInfo = selectedValues.contains("all")
                     ? "all seasons"
                     : selectedValues.size() + " season(s)";
+            postRequesterLog(event.getGuild(), event.getUser(), seriesTitle);
             event.getHook().editOriginal(
                     String.format("✅ Successfully added **%s** (%s) to the download queue!\n" +
                             "The episodes will be downloaded automatically.", seriesTitle, seasonInfo)
@@ -887,6 +897,56 @@ public class JoenetCommands extends ListenerAdapter {
      */
     private String truncateForId(String value) {
         return value != null && value.length() > 60 ? value.substring(0, 60) : value;
+    }
+
+    /**
+     * Posts a requester log message to the guild's configured requester log channel, if any.
+     * Records who requested a given piece of media and when.
+     *
+     * @param guild the guild the request was made in
+     * @param user  the user who made the request
+     * @param title the title of the requested media
+     */
+    private void postRequesterLog(Guild guild, User user, String title) {
+        if (guild == null) {
+            return;
+        }
+
+        Long channelId = configDatabase.getRequesterLogChannelId(guild.getIdLong());
+        if (channelId == null) {
+            return;
+        }
+
+        TextChannel channel = guild.getTextChannelById(channelId);
+        if (channel == null) {
+            log.warn("Configured requester log channel {} not found in guild {}", channelId, guild.getIdLong());
+            return;
+        }
+
+        String message = String.format("%s requested %s on %s.",
+                user.getName(), title, formatOrdinalDate(LocalDateTime.now()));
+        channel.sendMessage(message).queue();
+    }
+
+    /**
+     * Formats a date as e.g. "March 14th 2024".
+     */
+    private static String formatOrdinalDate(LocalDateTime dateTime) {
+        int day = dateTime.getDayOfMonth();
+        String suffix;
+        if (day >= 11 && day <= 13) {
+            suffix = "th";
+        } else {
+            suffix = switch (day % 10) {
+                case 1 -> "st";
+                case 2 -> "nd";
+                case 3 -> "rd";
+                default -> "th";
+            };
+        }
+
+        String month = dateTime.format(DateTimeFormatter.ofPattern("MMMM"));
+        return String.format("%s %d%s %d", month, day, suffix, dateTime.getYear());
     }
 }
 

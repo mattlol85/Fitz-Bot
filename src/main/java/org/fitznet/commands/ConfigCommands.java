@@ -35,6 +35,9 @@ public class ConfigCommands extends ListenerAdapter {
                 Commands.slash("setbotchannel", "Set the channel for bot milestone messages")
                         .addOption(OptionType.CHANNEL, "channel", "The text channel to use for bot messages", true),
                 Commands.slash("getbotchannel", "Show the current bot channel configuration"),
+                Commands.slash("setrequesterlogchannel", "Set the channel for requester logs (who requested what media)")
+                        .addOption(OptionType.CHANNEL, "channel", "The text channel to use for requester logs", true),
+                Commands.slash("getrequesterlogchannel", "Show the current requester log channel configuration"),
                 Commands.slash("resetjoincounts", "Reset all voice join counts for this server (Admin only)"),
                 Commands.slash("initializetracking", "Initialize tracking date for this server (Admin only)"),
                 Commands.slash("currentcount", "Show current voice join counts for all users in this server")
@@ -68,6 +71,8 @@ public class ConfigCommands extends ListenerAdapter {
             switch (commandName) {
                 case "setbotchannel" -> handleSetBotChannel(event);
                 case "getbotchannel" -> handleGetBotChannel(event);
+                case "setrequesterlogchannel" -> handleSetRequesterLogChannel(event);
+                case "getrequesterlogchannel" -> handleGetRequesterLogChannel(event);
                 case "resetjoincounts" -> handleResetJoinCounts(event);
                 case "initializetracking" -> handleInitializeTracking(event);
                 case "currentcount" -> handleCurrentCount(event);
@@ -97,6 +102,8 @@ public class ConfigCommands extends ListenerAdapter {
     private boolean isConfigCommand(String commandName) {
         return commandName.equals("setbotchannel") ||
                commandName.equals("getbotchannel") ||
+               commandName.equals("setrequesterlogchannel") ||
+               commandName.equals("getrequesterlogchannel") ||
                commandName.equals("resetjoincounts") ||
                commandName.equals("initializetracking") ||
                commandName.equals("currentcount");
@@ -177,6 +184,84 @@ public class ConfigCommands extends ListenerAdapter {
         } catch (Exception e) {
             log.error("Error in handleGetBotChannel", e);
             event.getHook().editOriginal("❌ An error occurred while getting the bot channel: " + e.getMessage()).queue();
+        }
+    }
+
+    private void handleSetRequesterLogChannel(SlashCommandInteractionEvent event) {
+        log.info("Processing setrequesterlogchannel command for guild: {}", event.getGuild().getName());
+
+        try {
+            // Check permissions
+            if (event.getMember() == null || !event.getMember().hasPermission(Permission.MANAGE_SERVER)) {
+                log.warn("User {} lacks MANAGE_SERVER permission", event.getUser().getName());
+                event.getHook().editOriginal("❌ You need the 'Manage Server' permission to use this command!").queue();
+                return;
+            }
+
+            // Get channel option
+            var channelOption = event.getOption("channel");
+            if (channelOption == null) {
+                log.warn("No channel option provided");
+                event.getHook().editOriginal("❌ No channel provided!").queue();
+                return;
+            }
+
+            // Validate channel type
+            var channel = channelOption.getAsChannel();
+            log.info("Channel selected: {} (type: {})", channel.getName(), channel.getType());
+
+            if (!(channel instanceof TextChannel textChannel)) {
+                log.warn("Non-text channel selected: {} (type: {})", channel.getName(), channel.getType());
+                event.getHook().editOriginal("❌ Please select a text channel, not a voice channel or category!").queue();
+                return;
+            }
+
+            long guildId = event.getGuild().getIdLong();
+            long channelId = textChannel.getIdLong();
+
+            log.info("Saving requester log channel config: guild={}, channel={} ({})", guildId, channelId, textChannel.getName());
+
+            // Save to database
+            configDatabase.setRequesterLogChannelId(guildId, channelId);
+
+            log.info("Successfully saved requester log channel config for guild {}", guildId);
+
+            // Send success response
+            event.getHook().editOriginal("✅ Requester log channel set to " + textChannel.getAsMention() +
+                    "\nRequester logs will now be sent here!").queue();
+
+        } catch (Exception e) {
+            log.error("Error in handleSetRequesterLogChannel", e);
+            event.getHook().editOriginal("❌ An error occurred while setting the requester log channel: " + e.getMessage()).queue();
+        }
+    }
+
+    private void handleGetRequesterLogChannel(SlashCommandInteractionEvent event) {
+        log.info("Processing getrequesterlogchannel command for guild: {}", event.getGuild().getName());
+
+        try {
+            long guildId = event.getGuild().getIdLong();
+            Long channelId = configDatabase.getRequesterLogChannelId(guildId);
+
+            if (channelId == null) {
+                log.info("No requester log channel configured for guild {}", guildId);
+                event.getHook().editOriginal("ℹ️ No requester log channel is currently configured.\nUse `/setrequesterlogchannel` to set one!").queue();
+                return;
+            }
+
+            TextChannel channel = event.getGuild().getTextChannelById(channelId);
+            if (channel == null) {
+                log.warn("Configured requester log channel {} not found in guild {}", channelId, guildId);
+                event.getHook().editOriginal("⚠️ Requester log channel was set to ID `" + channelId + "` but that channel no longer exists.\nUse `/setrequesterlogchannel` to set a new one!").queue();
+                return;
+            }
+
+            log.info("Requester log channel for guild {} is {}", guildId, channel.getName());
+            event.getHook().editOriginal("ℹ️ Requester log channel is currently set to " + channel.getAsMention()).queue();
+
+        } catch (Exception e) {
+            log.error("Error in handleGetRequesterLogChannel", e);
+            event.getHook().editOriginal("❌ An error occurred while getting the requester log channel: " + e.getMessage()).queue();
         }
     }
 

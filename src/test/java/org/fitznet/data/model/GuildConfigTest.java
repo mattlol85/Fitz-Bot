@@ -105,6 +105,26 @@ class GuildConfigTest {
     }
 
     @Test
+    void testRequesterLogChannelIdDefaultsToNull() {
+        assertNull(guildConfig.getRequesterLogChannelId(), "Requester log channel should default to null");
+    }
+
+    @Test
+    void testSetAndGetRequesterLogChannelId() {
+        guildConfig.setRequesterLogChannelId(555L);
+        assertEquals(555L, guildConfig.getRequesterLogChannelId());
+    }
+
+    @Test
+    void testBuilderWithRequesterLogChannelId() {
+        GuildConfig config = GuildConfig.builder()
+                .requesterLogChannelId(999L)
+                .build();
+
+        assertEquals(999L, config.getRequesterLogChannelId());
+    }
+
+    @Test
     void testGetMilestonesOrDefault() {
         // Test default milestones when not set
         int[] defaultMilestones = guildConfig.getMilestonesOrDefault();
