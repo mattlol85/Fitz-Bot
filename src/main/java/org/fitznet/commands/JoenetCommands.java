@@ -26,6 +26,12 @@ import org.fitznet.dto.sonarr.SonarrSeriesDto;
 import java.awt.Color;
 import java.time.OffsetDateTime;
 import java.time.Duration;
+import java.time.LocalDateTime;
+import java.time.format.DateTimeFormatter;
+import net.dv8tion.jda.api.entities.Guild;
+import net.dv8tion.jda.api.entities.User;
+import net.dv8tion.jda.api.entities.channel.concrete.TextChannel;
+import org.fitznet.data.GuildConfigDatabase;
 import org.fitznet.service.RadarrService;
 import org.fitznet.service.SonarrService;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -48,6 +54,8 @@ public class JoenetCommands extends ListenerAdapter {
 
     @Autowired
     private SonarrService sonarrService;
+
+    private final GuildConfigDatabase configDatabase = new GuildConfigDatabase();
 
     /**
      * Gets the slash command definitions.
