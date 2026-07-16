@@ -9,23 +9,17 @@ import net.dv8tion.jda.api.interactions.commands.OptionType;
 import net.dv8tion.jda.api.interactions.commands.build.Commands;
 import net.dv8tion.jda.api.interactions.commands.build.SlashCommandData;
 import org.fitznet.data.GuildConfigDatabase;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.stereotype.Component;
 
 /**
  * Slash command handler for bot configuration commands.
  */
 @Slf4j
+@Component
 public class ConfigCommands extends ListenerAdapter {
-    private final GuildConfigDatabase configDatabase;
-
-    public ConfigCommands() {
-        try {
-            this.configDatabase = new GuildConfigDatabase();
-            log.info("ConfigCommands initialized successfully");
-        } catch (Exception e) {
-            log.error("Failed to initialize ConfigCommands", e);
-            throw e;
-        }
-    }
+    @Autowired
+    private GuildConfigDatabase configDatabase;
 
     /**
      * Gets the slash command definitions.

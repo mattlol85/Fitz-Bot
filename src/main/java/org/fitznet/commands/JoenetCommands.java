@@ -55,7 +55,8 @@ public class JoenetCommands extends ListenerAdapter {
     @Autowired
     private SonarrService sonarrService;
 
-    private GuildConfigDatabase configDatabase = new GuildConfigDatabase();
+    @Autowired
+    private GuildConfigDatabase configDatabase;
 
     /**
      * Gets the slash command definitions.
