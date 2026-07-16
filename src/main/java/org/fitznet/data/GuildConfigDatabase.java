@@ -5,6 +5,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.fitznet.data.model.GuildConfig;
 import org.fitznet.util.Constants;
 import org.fitznet.util.JsonUtils;
+import org.springframework.stereotype.Component;
 
 import java.io.File;
 import java.io.IOException;
@@ -14,8 +15,13 @@ import java.util.concurrent.ConcurrentHashMap;
 /**
  * Database for storing guild-specific configuration settings.
  * Each guild can have its own bot channel and other settings.
+ *
+ * <p>Registered as a singleton Spring bean so every listener/command shares the same
+ * in-memory cache and file. Instantiating separate copies would let each hold a stale
+ * view and clobber the others' writes to {@code data/guild_configs.json}.</p>
  */
 @Slf4j
+@Component
 public class GuildConfigDatabase {
     private final Map<Long, GuildConfig> guildConfigs = new ConcurrentHashMap<>();
     private final String configFile;

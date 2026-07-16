@@ -11,22 +11,20 @@ import org.fitznet.data.GuildConfigDatabase;
 import org.fitznet.util.Constants;
 import org.fitznet.util.EmbedUtil;
 import org.jetbrains.annotations.NotNull;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.stereotype.Component;
 
 /**
  * Discord event listener that tracks voice channel joins.
  * Maintains voice join counts in persistent storage and sends milestone congratulations.
  */
 @Slf4j
+@Component
 public class LoginListener extends ListenerAdapter {
     private final int[] loginMilestones = Constants.DEFAULT_MILESTONES;
-    private final GuildConfigDatabase configDatabase;
 
-    /**
-     * Constructs a new LoginListener.
-     */
-    public LoginListener() {
-        this.configDatabase = new GuildConfigDatabase();
-    }
+    @Autowired
+    private GuildConfigDatabase configDatabase;
 
     /**
      * Handles guild voice update events from Discord.

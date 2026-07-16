@@ -35,6 +35,12 @@ public class BotService {
     @Autowired
     private WhitelistCommands whitelistCommands;
 
+    @Autowired
+    private LoginListener loginListener;
+
+    @Autowired
+    private ConfigCommands configCommands;
+
     /**
      * -- GETTER --
      *  Gets the JDA instance.
@@ -62,8 +68,8 @@ public class BotService {
                     .build().awaitReady();
 
             // Add event listeners
-            jda.addEventListener(new LoginListener());
-            jda.addEventListener(new ConfigCommands());
+            jda.addEventListener(loginListener);
+            jda.addEventListener(configCommands);
             jda.addEventListener(joenetCommands);
             jda.addEventListener(whitelistCommands);
 

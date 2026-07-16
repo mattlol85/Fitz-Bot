@@ -35,12 +35,7 @@ public class WhitelistCommands extends ListenerAdapter {
     private final MinecraftRconService rconService;
 
     @Autowired
-    public WhitelistCommands(MinecraftRconService rconService) {
-        this(new GuildConfigDatabase(), rconService);
-    }
-
-    /** Package-private constructor for testing with an injected database. */
-    WhitelistCommands(GuildConfigDatabase configDatabase, MinecraftRconService rconService) {
+    public WhitelistCommands(GuildConfigDatabase configDatabase, MinecraftRconService rconService) {
         this.configDatabase = configDatabase;
         this.rconService = rconService;
     }
