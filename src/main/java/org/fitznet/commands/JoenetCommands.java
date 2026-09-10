@@ -13,6 +13,7 @@ import net.dv8tion.jda.api.interactions.components.buttons.Button;
 import net.dv8tion.jda.api.interactions.components.selections.StringSelectMenu;
 import net.dv8tion.jda.api.interactions.components.text.TextInput;
 import net.dv8tion.jda.api.interactions.components.text.TextInputStyle;
+import net.dv8tion.jda.api.interactions.callbacks.IReplyCallback;
 import net.dv8tion.jda.api.interactions.modals.Modal;
 import net.dv8tion.jda.api.EmbedBuilder;
 import org.fitznet.dto.radarr.MovieSearchResponseDto;
@@ -32,6 +33,8 @@ import net.dv8tion.jda.api.entities.Guild;
 import net.dv8tion.jda.api.entities.User;
 import net.dv8tion.jda.api.entities.channel.concrete.TextChannel;
 import org.fitznet.data.GuildConfigDatabase;
+import org.fitznet.service.DownloadResult;
+import org.fitznet.service.MediaSearchException;
 import org.fitznet.service.RadarrService;
 import org.fitznet.service.SonarrService;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -102,16 +105,7 @@ public class JoenetCommands extends ListenerAdapter {
 
         } catch (Exception e) {
             log.error("Error in onSlashCommandInteraction for /joenet", e);
-            try {
-                if (event.isAcknowledged()) {
-                    event.getHook().editOriginal("❌ An error occurred while processing your command.").queue();
-                } else {
-                    event.reply("❌ An error occurred while processing your command.")
-                            .setEphemeral(true).queue();
-                }
-            } catch (Exception replyError) {
-                log.error("Failed to send error response", replyError);
-            }
+            sendError(event, "❌ An error occurred while processing your command.");
         }
     }
 
@@ -292,10 +286,12 @@ public class JoenetCommands extends ListenerAdapter {
             } else if (buttonId.startsWith("joenet:specificepisode:")) {
                 handleSpecificEpisodeButton(event);
             }
+        } catch (MediaSearchException e) {
+            log.warn("Media lookup unavailable handling button {}: {}", buttonId, e.getMessage());
+            sendError(event, "⚠️ The media database is temporarily unavailable. Please try again in a few moments.");
         } catch (Exception e) {
             log.error("Error handling button interaction: {}", buttonId, e);
-            event.reply("❌ An error occurred while processing your request.")
-                    .setEphemeral(true).queue();
+            sendError(event, "❌ An error occurred while processing your request.");
         }
     }
 
@@ -349,10 +345,12 @@ public class JoenetCommands extends ListenerAdapter {
             } else if ("joenet:search:tv".equals(modalId)) {
                 handleTvSearchModal(event);
             }
+        } catch (MediaSearchException e) {
+            log.warn("Media lookup unavailable handling modal {}: {}", modalId, e.getMessage());
+            sendError(event, "⚠️ The media database is temporarily unavailable. Please try again in a few moments.");
         } catch (Exception e) {
             log.error("Error handling modal interaction: {}", modalId, e);
-            event.reply("❌ An error occurred while searching for movies.")
-                    .setEphemeral(true).queue();
+            sendError(event, "❌ An error occurred while searching. Please try again.");
         }
     }
 
@@ -377,11 +375,13 @@ public class JoenetCommands extends ListenerAdapter {
                 .setPlaceholder("Select a movie to download");
 
         for (MovieSearchResponseDto movie : results) {
-            String label = String.format("%s (%d)", movie.getTitle(), movie.getYear());
+            String label = movie.getYear() != null
+                    ? String.format("%s (%d)", movie.getTitle(), movie.getYear())
+                    : movie.getTitle();
             String description = buildMovieDescription(movie);
-            String value = String.format("%d:%s", movie.getTmdbId(), movie.getTitle());
+            String value = movie.getTmdbId() + ":" + truncate(movie.getTitle(), 90);
 
-            menuBuilder.addOption(label, value, description);
+            menuBuilder.addOption(truncate(label, 100), value, description);
         }
 
         event.getHook().editOriginal(String.format("Found %d movie(s) for '%s':", results.size(), searchTerm))
@@ -414,9 +414,9 @@ public class JoenetCommands extends ListenerAdapter {
                     ? String.format("%s (%d)", series.getTitle(), series.getYear())
                     : series.getTitle();
             String description = buildSeriesDescription(series);
-            String value = String.format("%d:%s", series.getTvdbId(), series.getTitle());
+            String value = series.getTvdbId() + ":" + truncate(series.getTitle(), 90);
 
-            menuBuilder.addOption(label, value, description);
+            menuBuilder.addOption(truncate(label, 100), value, description);
         }
 
         event.getHook().editOriginal(String.format("Found %d TV show(s) for '%s':", results.size(), searchTerm))
@@ -494,10 +494,12 @@ public class JoenetCommands extends ListenerAdapter {
             } else if (selectId.startsWith("joenet:episodes:")) {
                 handleEpisodeSelection(event);
             }
+        } catch (MediaSearchException e) {
+            log.warn("Media lookup unavailable handling selection {}: {}", selectId, e.getMessage());
+            sendError(event, "⚠️ The media database is temporarily unavailable. Please try again in a few moments.");
         } catch (Exception e) {
             log.error("Error handling select interaction: {}", selectId, e);
-            event.reply("❌ An error occurred while adding the movie.")
-                    .setEphemeral(true).queue();
+            sendError(event, "❌ An error occurred while processing your selection.");
         }
     }
 
@@ -525,18 +527,22 @@ public class JoenetCommands extends ListenerAdapter {
         event.deferReply(true).queue();
 
         // Add movie to Radarr
-        boolean success = radarrService.downloadMovie(tmdbId, movieTitle);
+        DownloadResult result = radarrService.downloadMovie(tmdbId, movieTitle);
 
-        if (success) {
-            postRequesterLog(event.getGuild(), event.getUser(), movieTitle);
-            event.getHook().editOriginal(
-                    String.format("✅ Successfully added **%s** to the download queue!\n" +
-                            "The movie will be downloaded automatically.", movieTitle)
+        switch (result) {
+            case ADDED -> {
+                postRequesterLog(event.getGuild(), event.getUser(), movieTitle);
+                event.getHook().editOriginal(
+                        String.format("✅ Successfully added **%s** to the download queue!\n" +
+                                "The movie will be downloaded automatically.", movieTitle)
+                ).queue();
+            }
+            case ALREADY_EXISTS -> event.getHook().editOriginal(
+                    String.format("✅ **%s** is already in your library.", movieTitle)
             ).queue();
-        } else {
-            event.getHook().editOriginal(
+            case FAILED -> event.getHook().editOriginal(
                     String.format("❌ Failed to add **%s** to the download queue.\n" +
-                            "The movie may already exist in your library, or there was an error communicating with Radarr.", movieTitle)
+                            "There was an error communicating with Radarr.", movieTitle)
             ).queue();
         }
     }
@@ -673,21 +679,25 @@ public class JoenetCommands extends ListenerAdapter {
         }
 
         // Add series to Sonarr
-        boolean success = sonarrService.downloadSeries(tvdbId, seriesTitle, seasonsToDownload);
+        DownloadResult result = sonarrService.downloadSeries(tvdbId, seriesTitle, seasonsToDownload);
+        String seasonInfo = selectedValues.contains("all")
+                ? "all seasons"
+                : selectedValues.size() + " season(s)";
 
-        if (success) {
-            String seasonInfo = selectedValues.contains("all")
-                    ? "all seasons"
-                    : selectedValues.size() + " season(s)";
-            postRequesterLog(event.getGuild(), event.getUser(), seriesTitle);
-            event.getHook().editOriginal(
-                    String.format("✅ Successfully added **%s** (%s) to the download queue!\n" +
-                            "The episodes will be downloaded automatically.", seriesTitle, seasonInfo)
+        switch (result) {
+            case ADDED -> {
+                postRequesterLog(event.getGuild(), event.getUser(), seriesTitle);
+                event.getHook().editOriginal(
+                        String.format("✅ Successfully added **%s** (%s) to the download queue!\n" +
+                                "The episodes will be downloaded automatically.", seriesTitle, seasonInfo)
+                ).queue();
+            }
+            case ALREADY_EXISTS -> event.getHook().editOriginal(
+                    String.format("✅ **%s** is already in your library.", seriesTitle)
             ).queue();
-        } else {
-            event.getHook().editOriginal(
+            case FAILED -> event.getHook().editOriginal(
                     String.format("❌ Failed to add **%s** to the download queue.\n" +
-                            "The show may already exist in your library, or there was an error communicating with Sonarr.", seriesTitle)
+                            "There was an error communicating with Sonarr.", seriesTitle)
             ).queue();
         }
     }
@@ -823,10 +833,9 @@ public class JoenetCommands extends ListenerAdapter {
                 .setMaxValues(1);
 
         for (EpisodeDto ep : displayEpisodes) {
-            String label = String.format("E%02d – %s",
+            String label = truncate(String.format("E%02d – %s",
                     ep.getEpisodeNumber() != null ? ep.getEpisodeNumber() : 0,
-                    ep.getTitle() != null ? ep.getTitle() : "Unknown");
-            if (label.length() > 100) label = label.substring(0, 97) + "...";
+                    ep.getTitle() != null ? ep.getTitle() : "Unknown"), 100);
 
             String description = ep.isHasFile() ? "✅ Already downloaded" : "⬇️ Not yet downloaded";
             String value = String.valueOf(ep.getId());
@@ -898,6 +907,35 @@ public class JoenetCommands extends ListenerAdapter {
      */
     private String truncateForId(String value) {
         return value != null && value.length() > 60 ? value.substring(0, 60) : value;
+    }
+
+    /**
+     * Truncates {@code value} to at most {@code max} characters, appending "..." only when it
+     * actually had to cut. Null-safe (returns "").
+     *
+     * <p>Used to keep Discord select-menu option labels/values within their 100-char limit.
+     */
+    static String truncate(String value, int max) {
+        if (value == null) return "";
+        if (value.length() <= max) return value;
+        if (max <= 3) return value.substring(0, max);
+        return value.substring(0, max - 3) + "...";
+    }
+
+    /**
+     * Sends an error message on any interaction, whether or not it has already been
+     * deferred/acknowledged. Never throws.
+     */
+    private void sendError(IReplyCallback event, String message) {
+        try {
+            if (event.isAcknowledged()) {
+                event.getHook().editOriginal(message).queue();
+            } else {
+                event.reply(message).setEphemeral(true).queue();
+            }
+        } catch (Exception e) {
+            log.error("Failed to send error response for {}", event.getClass().getSimpleName(), e);
+        }
     }
 
     /**

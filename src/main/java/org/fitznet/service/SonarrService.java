@@ -15,10 +15,14 @@ import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpMethod;
 import org.springframework.http.ResponseEntity;
 import org.springframework.stereotype.Service;
+import org.springframework.web.client.HttpClientErrorException;
+import org.springframework.web.client.HttpStatusCodeException;
+import org.springframework.web.client.ResourceAccessException;
 import org.springframework.web.client.RestTemplate;
 import org.springframework.web.util.UriComponentsBuilder;
 
 import jakarta.annotation.PostConstruct;
+import java.net.URI;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Comparator;
@@ -84,12 +88,12 @@ public class SonarrService {
      */
     public List<SeriesSearchResponseDto> searchSeries(String searchTerm) {
         try {
-            String url = UriComponentsBuilder
+            URI url = UriComponentsBuilder
                     .fromHttpUrl(baseUrl + "/series/lookup")
                     .queryParam("term", searchTerm)
                     .build()
                     .encode()
-                    .toUriString();
+                    .toUri();
             log.info("Searching Sonarr for series: {}", searchTerm);
 
             HttpHeaders headers = new HttpHeaders();
@@ -114,6 +118,17 @@ public class SonarrService {
             // Limit to 5 results
             return results.size() > 5 ? results.subList(0, 5) : results;
 
+        } catch (HttpStatusCodeException e) {
+            if (e.getStatusCode().is5xxServerError() || e.getStatusCode().value() == 429) {
+                log.warn("Sonarr metadata lookup unavailable for '{}': {} {}",
+                        searchTerm, e.getStatusCode(), e.getStatusText());
+                throw new MediaSearchException("Sonarr metadata provider unavailable", e);
+            }
+            log.error("Error searching Sonarr for term '{}': {}", searchTerm, e.getMessage(), e);
+            return new ArrayList<>();
+        } catch (ResourceAccessException e) {
+            log.warn("Sonarr unreachable while searching for '{}': {}", searchTerm, e.getMessage());
+            throw new MediaSearchException("Sonarr unreachable", e);
         } catch (Exception e) {
             log.error("Error searching Sonarr for term '{}': {}", searchTerm, e.getMessage(), e);
             return new ArrayList<>();
@@ -126,9 +141,9 @@ public class SonarrService {
      * @param tvdbId      the TVDB ID of the series
      * @param seriesTitle the title of the series (for logging)
      * @param seasons     the list of seasons to monitor
-     * @return true if successful, false otherwise
+     * @return {@link DownloadResult#ADDED}, {@link DownloadResult#ALREADY_EXISTS}, or {@link DownloadResult#FAILED}
      */
-    public boolean downloadSeries(int tvdbId, String seriesTitle, List<Season> seasons) {
+    public DownloadResult downloadSeries(int tvdbId, String seriesTitle, List<Season> seasons) {
         try {
             String url = baseUrl + "/series";
             log.info("Adding series to Sonarr: {} (TVDB: {}) with {} seasons", seriesTitle, tvdbId, seasons.size());
@@ -155,21 +170,24 @@ public class SonarrService {
 
             if (response.getStatusCode().is2xxSuccessful()) {
                 log.info("Successfully added series to Sonarr: {}", seriesTitle);
-                return true;
-            } else {
-                log.warn("Sonarr returned non-success status for series {}: {}", seriesTitle, response.getStatusCode());
-                return false;
+                return DownloadResult.ADDED;
             }
+            log.warn("Sonarr returned non-success status for series {}: {}", seriesTitle, response.getStatusCode());
+            return DownloadResult.FAILED;
 
+        } catch (HttpClientErrorException e) {
+            String body = e.getResponseBodyAsString();
+            if (body != null && (body.contains("already") || body.contains("exists")
+                    || body.contains("ExistsValidator"))) {
+                log.info("Series '{}' (TVDB: {}) is already in the Sonarr library", seriesTitle, tvdbId);
+                return DownloadResult.ALREADY_EXISTS;
+            }
+            log.error("Sonarr rejected add for '{}' (TVDB: {}): {} {}",
+                    seriesTitle, tvdbId, e.getStatusCode(), body);
+            return DownloadResult.FAILED;
         } catch (Exception e) {
-            log.error("Error adding series '{}' (TVDB: {}) to Sonarr: {}", seriesTitle, tvdbId, e.getMessage(), e);
-
-            // Check if it's a duplicate series error
-            if (e.getMessage() != null && (e.getMessage().contains("already") || e.getMessage().contains("exists"))) {
-                log.info("Series '{}' already exists in Sonarr", seriesTitle);
-            }
-
-            return false;
+            log.error("Error adding series '{}' (TVDB: {}) to Sonarr", seriesTitle, tvdbId, e);
+            return DownloadResult.FAILED;
         }
     }
 
@@ -217,11 +235,12 @@ public class SonarrService {
      */
     public SonarrSeriesDto getSeriesByTvdbId(int tvdbId) {
         try {
-            String url = UriComponentsBuilder
+            URI url = UriComponentsBuilder
                     .fromHttpUrl(baseUrl + "/series")
                     .queryParam("tvdbId", tvdbId)
                     .build()
-                    .toUriString();
+                    .encode()
+                    .toUri();
             log.info("Looking up Sonarr library series by TVDB ID: {}", tvdbId);
 
             HttpHeaders headers = new HttpHeaders();
@@ -259,12 +278,13 @@ public class SonarrService {
      */
     public List<EpisodeDto> getEpisodes(int sonarrSeriesId, int seasonNumber) {
         try {
-            String url = UriComponentsBuilder
+            URI url = UriComponentsBuilder
                     .fromHttpUrl(baseUrl + "/episode")
                     .queryParam("seriesId", sonarrSeriesId)
                     .queryParam("seasonNumber", seasonNumber)
                     .build()
-                    .toUriString();
+                    .encode()
+                    .toUri();
             log.info("Fetching episodes for Sonarr series ID {} season {}", sonarrSeriesId, seasonNumber);
 
             HttpHeaders headers = new HttpHeaders();

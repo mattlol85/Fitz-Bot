@@ -11,10 +11,14 @@ import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpMethod;
 import org.springframework.http.ResponseEntity;
 import org.springframework.stereotype.Service;
+import org.springframework.web.client.HttpClientErrorException;
+import org.springframework.web.client.HttpStatusCodeException;
+import org.springframework.web.client.ResourceAccessException;
 import org.springframework.web.client.RestTemplate;
 import org.springframework.web.util.UriComponentsBuilder;
 
 import jakarta.annotation.PostConstruct;
+import java.net.URI;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
@@ -79,12 +83,12 @@ public class RadarrService {
      */
     public List<MovieSearchResponseDto> searchMovies(String searchTerm) {
         try {
-            String url = UriComponentsBuilder
+            URI url = UriComponentsBuilder
                     .fromHttpUrl(baseUrl + "/movie/lookup")
                     .queryParam("term", searchTerm)
                     .build()
                     .encode()
-                    .toUriString();
+                    .toUri();
             log.info("Searching Radarr for movies: {}", searchTerm);
 
             HttpHeaders headers = new HttpHeaders();
@@ -109,6 +113,17 @@ public class RadarrService {
             // Limit to 5 results
             return results.size() > 5 ? results.subList(0, 5) : results;
 
+        } catch (HttpStatusCodeException e) {
+            if (e.getStatusCode().is5xxServerError() || e.getStatusCode().value() == 429) {
+                log.warn("Radarr metadata lookup unavailable for '{}': {} {}",
+                        searchTerm, e.getStatusCode(), e.getStatusText());
+                throw new MediaSearchException("Radarr metadata provider unavailable", e);
+            }
+            log.error("Error searching Radarr for term '{}': {}", searchTerm, e.getMessage(), e);
+            return new ArrayList<>();
+        } catch (ResourceAccessException e) {
+            log.warn("Radarr unreachable while searching for '{}': {}", searchTerm, e.getMessage());
+            throw new MediaSearchException("Radarr unreachable", e);
         } catch (Exception e) {
             log.error("Error searching Radarr for term '{}': {}", searchTerm, e.getMessage(), e);
             return new ArrayList<>();
@@ -120,9 +135,9 @@ public class RadarrService {
      *
      * @param tmdbId     the TMDB ID of the movie
      * @param movieTitle the title of the movie (for logging)
-     * @return true if successful, false otherwise
+     * @return {@link DownloadResult#ADDED}, {@link DownloadResult#ALREADY_EXISTS}, or {@link DownloadResult#FAILED}
      */
-    public boolean downloadMovie(int tmdbId, String movieTitle) {
+    public DownloadResult downloadMovie(int tmdbId, String movieTitle) {
         try {
             String url = baseUrl + "/movie";
             log.info("Adding movie to Radarr: {} (TMDB: {})", movieTitle, tmdbId);
@@ -143,21 +158,24 @@ public class RadarrService {
 
             if (response.getStatusCode().is2xxSuccessful()) {
                 log.info("Successfully added movie to Radarr: {}", movieTitle);
-                return true;
-            } else {
-                log.warn("Radarr returned non-success status for movie {}: {}", movieTitle, response.getStatusCode());
-                return false;
+                return DownloadResult.ADDED;
             }
+            log.warn("Radarr returned non-success status for movie {}: {}", movieTitle, response.getStatusCode());
+            return DownloadResult.FAILED;
 
+        } catch (HttpClientErrorException e) {
+            String body = e.getResponseBodyAsString();
+            if (body != null && (body.contains("already") || body.contains("exists")
+                    || body.contains("ExistsValidator"))) {
+                log.info("Movie '{}' (TMDB: {}) is already in the Radarr library", movieTitle, tmdbId);
+                return DownloadResult.ALREADY_EXISTS;
+            }
+            log.error("Radarr rejected add for '{}' (TMDB: {}): {} {}",
+                    movieTitle, tmdbId, e.getStatusCode(), body);
+            return DownloadResult.FAILED;
         } catch (Exception e) {
-            log.error("Error adding movie '{}' (TMDB: {}) to Radarr: {}", movieTitle, tmdbId, e.getMessage(), e);
-
-            // Check if it's a duplicate movie error
-            if (e.getMessage() != null && (e.getMessage().contains("already") || e.getMessage().contains("exists"))) {
-                log.info("Movie '{}' already exists in Radarr", movieTitle);
-            }
-
-            return false;
+            log.error("Error adding movie '{}' (TMDB: {}) to Radarr", movieTitle, tmdbId, e);
+            return DownloadResult.FAILED;
         }
     }
 
