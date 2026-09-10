@@ -106,7 +106,7 @@ class JoenetCommandsRequesterLogTest {
 
         when(selectEvent.getComponentId()).thenReturn("joenet:select:movie");
         when(selectEvent.getValues()).thenReturn(Collections.singletonList("603:The Matrix"));
-        when(radarrService.downloadMovie(603, "The Matrix")).thenReturn(true);
+        when(radarrService.downloadMovie(603, "The Matrix")).thenReturn(org.fitznet.service.DownloadResult.ADDED);
 
         joenetCommands.onStringSelectInteraction(selectEvent);
 
@@ -122,7 +122,7 @@ class JoenetCommandsRequesterLogTest {
     void testMovieDownload_NoRequesterLog_WhenChannelNotConfigured() {
         when(selectEvent.getComponentId()).thenReturn("joenet:select:movie");
         when(selectEvent.getValues()).thenReturn(Collections.singletonList("603:The Matrix"));
-        when(radarrService.downloadMovie(603, "The Matrix")).thenReturn(true);
+        when(radarrService.downloadMovie(603, "The Matrix")).thenReturn(org.fitznet.service.DownloadResult.ADDED);
 
         joenetCommands.onStringSelectInteraction(selectEvent);
 
@@ -136,7 +136,7 @@ class JoenetCommandsRequesterLogTest {
 
         when(selectEvent.getComponentId()).thenReturn("joenet:select:movie");
         when(selectEvent.getValues()).thenReturn(Collections.singletonList("603:The Matrix"));
-        when(radarrService.downloadMovie(603, "The Matrix")).thenReturn(false);
+        when(radarrService.downloadMovie(603, "The Matrix")).thenReturn(org.fitznet.service.DownloadResult.FAILED);
 
         joenetCommands.onStringSelectInteraction(selectEvent);
 

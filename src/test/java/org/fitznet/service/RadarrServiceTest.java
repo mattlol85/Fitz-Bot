@@ -7,10 +7,15 @@ import org.junit.jupiter.api.Test;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.MockitoAnnotations;
+import org.mockito.ArgumentCaptor;
 import org.springframework.http.*;
 import org.springframework.test.util.ReflectionTestUtils;
+import org.springframework.web.client.HttpClientErrorException;
+import org.springframework.web.client.HttpServerErrorException;
+import org.springframework.web.client.ResourceAccessException;
 import org.springframework.web.client.RestTemplate;
 
+import java.net.URI;
 import java.util.Arrays;
 import java.util.List;
 
@@ -53,7 +58,7 @@ class RadarrServiceTest {
         ResponseEntity<MovieSearchResponseDto[]> responseEntity =
                 new ResponseEntity<>(mockResponse, HttpStatus.OK);
 
-        when(restTemplate.exchange(anyString(), eq(HttpMethod.GET), any(HttpEntity.class),
+        when(restTemplate.exchange(any(URI.class), eq(HttpMethod.GET), any(HttpEntity.class),
                 eq(MovieSearchResponseDto[].class))).thenReturn(responseEntity);
 
         List<MovieSearchResponseDto> results = radarrService.searchMovies("Dune");
@@ -72,7 +77,7 @@ class RadarrServiceTest {
         ResponseEntity<MovieSearchResponseDto[]> responseEntity =
                 new ResponseEntity<>(mockResponse, HttpStatus.OK);
 
-        when(restTemplate.exchange(anyString(), eq(HttpMethod.GET), any(HttpEntity.class),
+        when(restTemplate.exchange(any(URI.class), eq(HttpMethod.GET), any(HttpEntity.class),
                 eq(MovieSearchResponseDto[].class))).thenReturn(responseEntity);
 
         List<MovieSearchResponseDto> results = radarrService.searchMovies("Movie");
@@ -86,7 +91,7 @@ class RadarrServiceTest {
         ResponseEntity<MovieSearchResponseDto[]> responseEntity =
                 new ResponseEntity<>(null, HttpStatus.OK);
 
-        when(restTemplate.exchange(anyString(), eq(HttpMethod.GET), any(HttpEntity.class),
+        when(restTemplate.exchange(any(URI.class), eq(HttpMethod.GET), any(HttpEntity.class),
                 eq(MovieSearchResponseDto[].class))).thenReturn(responseEntity);
 
         List<MovieSearchResponseDto> results = radarrService.searchMovies("Something");
@@ -97,13 +102,101 @@ class RadarrServiceTest {
 
     @Test
     void testSearchMovies_Exception() {
-        when(restTemplate.exchange(anyString(), eq(HttpMethod.GET), any(HttpEntity.class),
+        when(restTemplate.exchange(any(URI.class), eq(HttpMethod.GET), any(HttpEntity.class),
                 eq(MovieSearchResponseDto[].class))).thenThrow(new RuntimeException("Connection refused"));
 
         List<MovieSearchResponseDto> results = radarrService.searchMovies("Dune");
 
         assertNotNull(results);
         assertTrue(results.isEmpty());
+    }
+
+    @Test
+    void testSearchMovies_ServerError_ThrowsMediaSearchException() {
+        when(restTemplate.exchange(any(URI.class), eq(HttpMethod.GET), any(HttpEntity.class),
+                eq(MovieSearchResponseDto[].class)))
+                .thenThrow(HttpServerErrorException.create(HttpStatus.SERVICE_UNAVAILABLE,
+                        "Service Unavailable", HttpHeaders.EMPTY, new byte[0], null));
+
+        assertThrows(MediaSearchException.class, () -> radarrService.searchMovies("Dune"));
+    }
+
+    @Test
+    void testSearchMovies_ConnectionFailure_ThrowsMediaSearchException() {
+        when(restTemplate.exchange(any(URI.class), eq(HttpMethod.GET), any(HttpEntity.class),
+                eq(MovieSearchResponseDto[].class)))
+                .thenThrow(new ResourceAccessException("connect timed out"));
+
+        assertThrows(MediaSearchException.class, () -> radarrService.searchMovies("Dune"));
+    }
+
+    @Test
+    void testSearchMovies_NotFound_ReturnsEmptyList() {
+        when(restTemplate.exchange(any(URI.class), eq(HttpMethod.GET), any(HttpEntity.class),
+                eq(MovieSearchResponseDto[].class)))
+                .thenThrow(HttpClientErrorException.create(HttpStatus.NOT_FOUND,
+                        "Not Found", HttpHeaders.EMPTY, new byte[0], null));
+
+        List<MovieSearchResponseDto> results = radarrService.searchMovies("Dune");
+
+        assertNotNull(results);
+        assertTrue(results.isEmpty());
+    }
+
+    @Test
+    void testSearchMovies_EncodesTermExactlyOnce() {
+        when(restTemplate.exchange(any(URI.class), eq(HttpMethod.GET), any(HttpEntity.class),
+                eq(MovieSearchResponseDto[].class)))
+                .thenReturn(new ResponseEntity<>(new MovieSearchResponseDto[0], HttpStatus.OK));
+
+        radarrService.searchMovies("Borat Subsequent Moviefilm");
+
+        ArgumentCaptor<URI> uriCaptor = ArgumentCaptor.forClass(URI.class);
+        verify(restTemplate).exchange(uriCaptor.capture(), eq(HttpMethod.GET),
+                any(HttpEntity.class), eq(MovieSearchResponseDto[].class));
+        String rawQuery = uriCaptor.getValue().getRawQuery();
+        assertEquals("term=Borat%20Subsequent%20Moviefilm", rawQuery);
+        assertFalse(rawQuery.contains("%2520"), "term must not be double-encoded");
+    }
+
+    // ── downloadMovie tests ─────────────────────────────────────────────────────
+
+    @Test
+    void testDownloadMovie_Success_ReturnsAdded() {
+        when(restTemplate.exchange(anyString(), eq(HttpMethod.POST), any(HttpEntity.class),
+                eq(String.class))).thenReturn(new ResponseEntity<>("{}", HttpStatus.CREATED));
+
+        assertEquals(DownloadResult.ADDED, radarrService.downloadMovie(438631, "Dune"));
+    }
+
+    @Test
+    void testDownloadMovie_AlreadyExists_ReturnsAlreadyExists() {
+        String body = "[{\"propertyName\":\"TmdbId\",\"errorCode\":\"MovieExistsValidator\","
+                + "\"errorMessage\":\"This movie has already been added\"}]";
+        when(restTemplate.exchange(anyString(), eq(HttpMethod.POST), any(HttpEntity.class),
+                eq(String.class)))
+                .thenThrow(HttpClientErrorException.create(HttpStatus.BAD_REQUEST, "Bad Request",
+                        HttpHeaders.EMPTY, body.getBytes(), null));
+
+        assertEquals(DownloadResult.ALREADY_EXISTS, radarrService.downloadMovie(515295, "Kase-san and Morning Glories"));
+    }
+
+    @Test
+    void testDownloadMovie_GenericHttpError_ReturnsFailed() {
+        when(restTemplate.exchange(anyString(), eq(HttpMethod.POST), any(HttpEntity.class),
+                eq(String.class)))
+                .thenThrow(HttpClientErrorException.create(HttpStatus.BAD_REQUEST, "Bad Request",
+                        HttpHeaders.EMPTY, "[{\"errorMessage\":\"invalid root folder\"}]".getBytes(), null));
+
+        assertEquals(DownloadResult.FAILED, radarrService.downloadMovie(1, "Whatever"));
+    }
+
+    @Test
+    void testDownloadMovie_ConnectionException_ReturnsFailed() {
+        when(restTemplate.exchange(anyString(), eq(HttpMethod.POST), any(HttpEntity.class),
+                eq(String.class))).thenThrow(new ResourceAccessException("connection reset"));
+
+        assertEquals(DownloadResult.FAILED, radarrService.downloadMovie(1, "Whatever"));
     }
 
     // ── getQueueDetails tests ───────────────────────────────────────────────────
