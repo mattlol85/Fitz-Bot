@@ -203,42 +203,35 @@ jobs:
         grep "version = " build.gradle
         echo "::endgroup::"
 
-    - name: 📥 Download original JAR
-      uses: actions/download-artifact@v7
+    - name: ☕ Set up JDK 21
+      uses: actions/setup-java@v5
       with:
-        name: application-jar
-        path: ./downloaded-jar
+        java-version: '21'
+        distribution: 'temurin'
 
-    - name: 🔄 Rename JAR with new version
+    - name: 🔧 Setup Gradle
+      uses: gradle/actions/setup-gradle@v5
+
+    - name: 🔨 Make gradlew executable
+      run: chmod +x ./gradlew
+
+    - name: 🏗️ Rebuild JAR with bumped version
       id: final-jar
       run: |
-        echo "::group::Preparing final JAR"
-        NEW_VERSION="${{ steps.version.outputs.new-version-no-v }}"
-        
-        # Find the downloaded JAR
-        ORIGINAL_JAR=$(find ./downloaded-jar -name "*.jar" | head -1)
-        ORIGINAL_NAME=$(basename "$ORIGINAL_JAR")
-        
-        # Create new JAR name with correct version
-        # Extract base name without version and add new version
-        BASE_NAME=$(echo "$ORIGINAL_NAME" | sed 's/-[0-9]\+\.[0-9]\+\.[0-9]\+.*\.jar$//')
-        NEW_JAR_NAME="${BASE_NAME}-${NEW_VERSION}.jar"
-        NEW_JAR_PATH="./downloaded-jar/$NEW_JAR_NAME"
-        
-        # Only rename if the names are different
-        if [[ "$ORIGINAL_NAME" != "$NEW_JAR_NAME" ]]; then
-          echo "📝 Renaming JAR: $ORIGINAL_NAME → $NEW_JAR_NAME"
-          mv "$ORIGINAL_JAR" "$NEW_JAR_PATH"
-          echo "✅ JAR renamed successfully"
-        else
-          echo "ℹ️  JAR already has correct name: $ORIGINAL_NAME"
-          NEW_JAR_PATH="$ORIGINAL_JAR"
-        fi
-        
-        echo "jar-path=$NEW_JAR_PATH" >> $GITHUB_OUTPUT
-        echo "jar-name=$NEW_JAR_NAME" >> $GITHUB_OUTPUT
-        
-        echo "📦 Final JAR location: $NEW_JAR_PATH"
+        echo "::group::Rebuilding JAR"
+        # build.gradle now has the bumped version (previous step), so the JAR's
+        # baked-in Implementation-Version (what "Starting Main vX.Y.Z" logs)
+        # matches the tag/release instead of lagging one release behind.
+        ./gradlew clean bootJar --console=plain
+
+        JAR_PATH=$(find build/libs -name "*.jar" -not -name "*-plain.jar" | head -1)
+        JAR_NAME=$(basename "$JAR_PATH")
+
+        echo "jar-path=$JAR_PATH" >> $GITHUB_OUTPUT
+        echo "jar-name=$JAR_NAME" >> $GITHUB_OUTPUT
+
+        echo "✅ Built JAR: $JAR_NAME"
+        echo "📦 JAR location: $JAR_PATH"
         echo "::endgroup::"
 
     - name: 📝 Commit version update
