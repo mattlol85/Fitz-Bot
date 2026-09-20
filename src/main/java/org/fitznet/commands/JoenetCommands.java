@@ -17,6 +17,7 @@ import net.dv8tion.jda.api.interactions.callbacks.IReplyCallback;
 import net.dv8tion.jda.api.interactions.InteractionHook;
 import net.dv8tion.jda.api.interactions.modals.Modal;
 import net.dv8tion.jda.api.EmbedBuilder;
+import net.dv8tion.jda.api.entities.MessageEmbed;
 import org.fitznet.dto.radarr.MovieSearchResponseDto;
 import org.fitznet.dto.radarr.RadarrQueueItemDto;
 import org.fitznet.dto.sonarr.EpisodeDto;
@@ -153,58 +154,57 @@ public class JoenetCommands extends ListenerAdapter {
     }
 
     private Color resolveEmbedColor(QueueSectionResult radarr, QueueSectionResult sonarr) {
-        if (radarr.serviceError() || sonarr.serviceError()) {
-            return Color.decode("#E74C3C"); // red — a service is unreachable, needs attention
+        QueueCounts totals = radarr.counts().plus(sonarr.counts());
+        if (radarr.serviceError() || sonarr.serviceError() || totals.failed() > 0) {
+            return Color.decode("#E74C3C"); // red — something is broken or unreachable
         }
-        int failed = radarr.failedCount() + sonarr.failedCount();
-        if (failed > 0) {
-            return Color.decode("#E74C3C"); // red
-        }
-        int warning = radarr.warningCount() + sonarr.warningCount();
-        if (warning > 0) {
+        if (totals.warning() > 0) {
             return Color.decode("#E67E22"); // orange
         }
-        int active = radarr.downloadingCount() + radarr.queuedCount() + radarr.pausedCount()
-                + sonarr.downloadingCount() + sonarr.queuedCount() + sonarr.pausedCount();
-        if (active > 0) {
+        if (totals.active() > 0) {
             return Color.decode("#3498DB"); // blue — business as usual
         }
         return Color.decode("#2ECC71"); // green — everything caught up
     }
 
     private String buildFooterSummary(QueueSectionResult radarr, QueueSectionResult sonarr) {
-        int warning = radarr.warningCount() + sonarr.warningCount();
-        int failed = radarr.failedCount() + sonarr.failedCount();
-        int downloading = radarr.downloadingCount() + sonarr.downloadingCount();
-        int paused = radarr.pausedCount() + sonarr.pausedCount();
-        int queued = radarr.queuedCount() + sonarr.queuedCount();
+        QueueCounts totals = radarr.counts().plus(sonarr.counts());
 
         List<String> parts = new ArrayList<>();
-        if (failed > 0) parts.add(failed + " failed");
-        if (warning > 0) parts.add(warning + " warning" + (warning == 1 ? "" : "s"));
-        if (downloading > 0) parts.add(downloading + " downloading");
-        if (paused > 0) parts.add(paused + " paused");
-        if (queued > 0) parts.add(queued + " queued");
+        if (radarr.serviceError()) parts.add("Radarr unavailable");
+        if (sonarr.serviceError()) parts.add("Sonarr unavailable");
+        if (totals.failed() > 0) parts.add(totals.failed() + " failed");
+        if (totals.warning() > 0) parts.add(totals.warning() + " warning" + (totals.warning() == 1 ? "" : "s"));
+        if (totals.downloading() > 0) parts.add(totals.downloading() + " downloading");
+        if (totals.paused() > 0) parts.add(totals.paused() + " paused");
+        if (totals.other() > 0) parts.add(totals.other() + " other");
+        if (totals.queued() > 0) parts.add(totals.queued() + " queued");
 
-        if (parts.isEmpty()) {
-            return "All caught up ✅";
-        }
-        return String.join(" · ", parts);
+        return parts.isEmpty() ? "All caught up ✅" : String.join(" · ", parts);
     }
 
-    /**
-     * Rendered text for a Radarr/Sonarr queue field, plus per-status counts used
-     * to drive the embed color and footer summary.
-     */
-    private record QueueSectionResult(String text, int warningCount, int failedCount,
-                                       int downloadingCount, int queuedCount,
-                                       int pausedCount, boolean serviceError) {
+    /** Per-bucket item counts for one queue section. */
+    private record QueueCounts(int warning, int failed, int downloading, int paused, int queued, int other) {
+        static final QueueCounts NONE = new QueueCounts(0, 0, 0, 0, 0, 0);
+
+        QueueCounts plus(QueueCounts o) {
+            return new QueueCounts(warning + o.warning, failed + o.failed, downloading + o.downloading,
+                    paused + o.paused, queued + o.queued, other + o.other);
+        }
+
+        int active() {
+            return downloading + paused + queued + other;
+        }
+    }
+
+    /** Rendered text for a Radarr/Sonarr queue field plus the counts that drive embed color and footer. */
+    private record QueueSectionResult(String text, QueueCounts counts, boolean serviceError) {
         static QueueSectionResult error() {
-            return new QueueSectionResult("⚠️ Service unavailable", 0, 0, 0, 0, 0, true);
+            return new QueueSectionResult("⚠️ Service unavailable", QueueCounts.NONE, true);
         }
 
         static QueueSectionResult empty() {
-            return new QueueSectionResult("✅ Queue is empty", 0, 0, 0, 0, 0, false);
+            return new QueueSectionResult("✅ Queue is empty", QueueCounts.NONE, false);
         }
     }
 
@@ -212,9 +212,31 @@ public class JoenetCommands extends ListenerAdapter {
     private record QueueItemView(String title, String status, String trackedStatus,
                                   Double size, Double sizeleft, String eta) {}
 
-    private static final int MAX_ACTIONABLE_ITEMS = 15;
     private static final List<String> BUCKET_ORDER =
             List.of("warning", "failed", "paused", "downloading", "other");
+
+    // Characters kept free for the trailing "…and N more" line so it can never push a field over the limit.
+    private static final int OVERFLOW_LINE_RESERVE = 32;
+
+    /**
+     * Buckets an item by what a user needs to know. Status alone is not enough: Radarr/Sonarr often
+     * report a stuck download as status "downloading" with trackedDownloadStatus "warning"/"error".
+     */
+    private String bucketOf(QueueItemView item) {
+        String status = item.status() == null ? "" : item.status().toLowerCase();
+        String tracked = item.trackedStatus() == null ? "" : item.trackedStatus().toLowerCase();
+
+        if (status.equals("failed") || tracked.equals("error")) return "failed";
+        if (status.equals("warning") || status.equals("downloadclientunavailable") || tracked.equals("warning")) {
+            return "warning";
+        }
+        return switch (status) {
+            case "queued" -> "queued";
+            case "paused" -> "paused";
+            case "downloading" -> "downloading";
+            default -> "other";
+        };
+    }
 
     private QueueSectionResult formatQueueSection(List<?> items, boolean error) {
         if (error) {
@@ -237,64 +259,75 @@ public class JoenetCommands extends ListenerAdapter {
         for (String key : BUCKET_ORDER) {
             buckets.put(key, new ArrayList<>());
         }
-        List<QueueItemView> queuedItems = new ArrayList<>();
+        int queuedCount = 0;
 
         for (QueueItemView item : activeItems) {
-            String normalized = item.status() == null ? "other" : item.status().toLowerCase();
-            switch (normalized) {
-                case "queued" -> queuedItems.add(item);
-                case "warning", "failed", "paused", "downloading" -> buckets.get(normalized).add(item);
-                default -> buckets.get("other").add(item);
+            String bucket = bucketOf(item);
+            if (bucket.equals("queued")) {
+                queuedCount++;
+            } else {
+                buckets.get(bucket).add(item);
             }
         }
 
+        String queuedLine = queuedCount == 0 ? ""
+                : "⏳ Queued — " + queuedCount + (queuedCount == 1 ? " title" : " titles") + " waiting\n";
+        int budget = MessageEmbed.VALUE_MAX_LENGTH - queuedLine.length() - OVERFLOW_LINE_RESERVE;
+
         StringBuilder sb = new StringBuilder();
-        int rendered = 0;
-        int warningCount = buckets.get("warning").size();
-        int failedCount = buckets.get("failed").size();
-        int downloadingCount = buckets.get("downloading").size();
-        int pausedCount = buckets.get("paused").size();
-        int queuedCount = queuedItems.size();
+        int hidden = 0;
+        boolean full = false;
 
         for (String key : BUCKET_ORDER) {
             List<QueueItemView> bucket = buckets.get(key);
             if (bucket.isEmpty()) {
                 continue;
             }
-
-            if (rendered >= MAX_ACTIONABLE_ITEMS) {
-                sb.append("*…and ").append(bucket.size()).append(" more ").append(bucketLabel(key).toLowerCase()).append("*\n");
+            if (full) {
+                hidden += bucket.size();
                 continue;
             }
 
-            int remainingBudget = MAX_ACTIONABLE_ITEMS - rendered;
-            int toShow = Math.min(bucket.size(), remainingBudget);
-
             if (bucket.size() == 1) {
-                sb.append(renderFlatLine(bucket.get(0))).append("\n");
-            } else {
-                String emoji = getStatusEmoji(key.equals("other") ? null : key, null);
-                sb.append(emoji).append(" ").append(bucketLabel(key)).append(" (").append(bucket.size()).append(")\n");
-                for (int i = 0; i < toShow; i++) {
-                    sb.append(renderIndentedLine(bucket.get(i))).append("\n");
+                String line = renderFlatLine(bucket.get(0), key) + "\n";
+                if (sb.length() + line.length() <= budget) {
+                    sb.append(line);
+                } else {
+                    full = true;
+                    hidden++;
                 }
-                if (bucket.size() > toShow) {
-                    sb.append("  *…and ").append(bucket.size() - toShow).append(" more*\n");
+                continue;
+            }
+
+            String header = getStatusEmoji(key.equals("other") ? null : key, null)
+                    + " " + bucketLabel(key) + " (" + bucket.size() + ")\n";
+            String firstLine = renderIndentedLine(bucket.get(0)) + "\n";
+            if (sb.length() + header.length() + firstLine.length() > budget) {
+                full = true;
+                hidden += bucket.size();
+                continue;
+            }
+            sb.append(header);
+            for (int i = 0; i < bucket.size(); i++) {
+                String line = renderIndentedLine(bucket.get(i)) + "\n";
+                if (full || sb.length() + line.length() > budget) {
+                    full = true;
+                    hidden++;
+                } else {
+                    sb.append(line);
                 }
             }
-            rendered += toShow;
         }
 
-        if (!queuedItems.isEmpty()) {
-            String noun = queuedItems.size() == 1 ? "title" : "titles";
-            sb.append("⏳ Queued — ").append(queuedItems.size()).append(" ").append(noun).append(" waiting\n");
+        if (hidden > 0) {
+            sb.append("*…and ").append(hidden).append(" more*\n");
         }
+        sb.append(queuedLine);
 
-        String result = sb.toString().trim();
-        if (result.isEmpty()) {
-            return QueueSectionResult.empty();
-        }
-        return new QueueSectionResult(result, warningCount, failedCount, downloadingCount, queuedCount, pausedCount, false);
+        QueueCounts counts = new QueueCounts(
+                buckets.get("warning").size(), buckets.get("failed").size(), buckets.get("downloading").size(),
+                buckets.get("paused").size(), queuedCount, buckets.get("other").size());
+        return new QueueSectionResult(sb.toString().trim(), counts, false);
     }
 
     private String bucketLabel(String key) {
@@ -307,44 +340,40 @@ public class JoenetCommands extends ListenerAdapter {
         };
     }
 
-    private String renderFlatLine(QueueItemView item) {
-        String displayTitle = truncateTitle(item.title());
-        String statusEmoji = getStatusEmoji(item.status(), item.trackedStatus());
+    private String renderFlatLine(QueueItemView item, String bucket) {
+        String label = bucket.equals("other") && item.status() != null && !item.status().isEmpty()
+                ? capitalise(item.status())
+                : bucketLabel(bucket);
         StringBuilder sb = new StringBuilder();
-        sb.append(statusEmoji).append(" **").append(displayTitle).append("** — ").append(capitalise(item.status()));
+        sb.append(getStatusEmoji(bucket.equals("other") ? null : bucket, null))
+                .append(" **").append(truncateTitle(item.title())).append("** — ").append(label);
 
         Double progress = computeProgress(item.size(), item.sizeleft());
-        String etaText = computeEtaText(item.eta());
 
-        if ("downloading".equalsIgnoreCase(item.status())) {
-            if (progress != null) {
-                sb.append(String.format(" — %.0f%%", progress));
-            }
-            if (etaText != null) {
-                sb.append(" — ").append(etaText);
-            }
-        } else {
-            sb.append(", stalled at ").append(progress != null ? String.format("%.0f%%", progress) : "0%");
+        if (bucket.equals("downloading")) {
+            sb.append(progressAndEta(item));
+        } else if (bucket.equals("warning") && (progress == null || progress <= 0)) {
+            sb.append(", stalled at 0%");
+        } else if (progress != null) {
+            sb.append(String.format(" (%.0f%%)", progress));
         }
-
         return sb.toString();
     }
 
     private String renderIndentedLine(QueueItemView item) {
-        String displayTitle = truncateTitle(item.title());
-        StringBuilder sb = new StringBuilder();
-        sb.append(" • ").append(displayTitle);
+        return " • " + truncateTitle(item.title()) + progressAndEta(item);
+    }
 
+    private String progressAndEta(QueueItemView item) {
+        StringBuilder sb = new StringBuilder();
         Double progress = computeProgress(item.size(), item.sizeleft());
         if (progress != null) {
             sb.append(String.format(" — %.0f%%", progress));
         }
-
         String etaText = computeEtaText(item.eta());
         if (etaText != null) {
             sb.append(" — ").append(etaText);
         }
-
         return sb.toString();
     }
 
