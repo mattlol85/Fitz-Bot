@@ -14,6 +14,7 @@ import net.dv8tion.jda.api.interactions.components.selections.StringSelectMenu;
 import net.dv8tion.jda.api.interactions.components.text.TextInput;
 import net.dv8tion.jda.api.interactions.components.text.TextInputStyle;
 import net.dv8tion.jda.api.interactions.callbacks.IReplyCallback;
+import net.dv8tion.jda.api.interactions.InteractionHook;
 import net.dv8tion.jda.api.interactions.modals.Modal;
 import net.dv8tion.jda.api.EmbedBuilder;
 import org.fitznet.dto.radarr.MovieSearchResponseDto;
@@ -43,6 +44,8 @@ import org.springframework.stereotype.Component;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
+import java.util.Map;
+import java.util.TreeMap;
 import java.util.stream.Collectors;
 
 /**
@@ -69,7 +72,8 @@ public class JoenetCommands extends ListenerAdapter {
                 Commands.slash("joenet", "Download movies or TV shows from JoeNet")
                         .addSubcommands(
                                 new SubcommandData("download", "Search and download movies or TV shows"),
-                                new SubcommandData("status", "View the current JoeNet download queue")
+                                new SubcommandData("status", "View the current JoeNet download queue"),
+                                new SubcommandData("episodefix", "Check a show for missing episodes and re-trigger their search")
                         )
         };
     }
@@ -99,6 +103,8 @@ public class JoenetCommands extends ListenerAdapter {
                 handleDownloadCommand(event);
             } else if ("status".equals(subcommand)) {
                 handleStatusCommand(event);
+            } else if ("episodefix".equals(subcommand)) {
+                handleEpisodeFixCommand(event);
             } else {
                 event.getHook().editOriginal("❌ Unknown subcommand").queue();
             }
@@ -285,6 +291,8 @@ public class JoenetCommands extends ListenerAdapter {
                 handleTvButton(event);
             } else if (buttonId.startsWith("joenet:specificepisode:")) {
                 handleSpecificEpisodeButton(event);
+            } else if ("joenet:episodefix:start".equals(buttonId)) {
+                handleEpisodeFixStartButton(event);
             }
         } catch (MediaSearchException e) {
             log.warn("Media lookup unavailable handling button {}: {}", buttonId, e.getMessage());
@@ -344,6 +352,8 @@ public class JoenetCommands extends ListenerAdapter {
                 handleMovieSearchModal(event);
             } else if ("joenet:search:tv".equals(modalId)) {
                 handleTvSearchModal(event);
+            } else if ("joenet:episodefix:search".equals(modalId)) {
+                handleEpisodeFixSearchModal(event);
             }
         } catch (MediaSearchException e) {
             log.warn("Media lookup unavailable handling modal {}: {}", modalId, e.getMessage());
@@ -493,6 +503,10 @@ public class JoenetCommands extends ListenerAdapter {
                 handleEpisodeSeasonSelection(event);
             } else if (selectId.startsWith("joenet:episodes:")) {
                 handleEpisodeSelection(event);
+            } else if ("joenet:episodefix:select".equals(selectId)) {
+                handleEpisodeFixSeriesSelection(event);
+            } else if (selectId.startsWith("joenet:episodefix:seasons:")) {
+                handleEpisodeFixSeasonSelection(event);
             }
         } catch (MediaSearchException e) {
             log.warn("Media lookup unavailable handling selection {}: {}", selectId, e.getMessage());
@@ -886,6 +900,215 @@ public class JoenetCommands extends ListenerAdapter {
             event.getHook().editOriginal(
                     "❌ Failed to trigger episode search. " +
                             "Please check your Sonarr connection or try again later."
+            ).queue();
+        }
+    }
+
+    // ── Episode Fix flow ────────────────────────────────────────────────────
+
+    /**
+     * Handles the /joenet episodefix subcommand. Since the parent /joenet command is always
+     * deferred before dispatch, a modal can't be opened directly here — so this presents a
+     * button first, mirroring the download flow's slash-command → button → modal shape.
+     */
+    private void handleEpisodeFixCommand(SlashCommandInteractionEvent event) {
+        log.info("Processing /joenet episodefix command");
+
+        Button startButton = Button.primary("joenet:episodefix:start", "🔧 Find a show");
+
+        event.getHook().editOriginal("Find a TV show already in your library to check for missing episodes:")
+                .setActionRow(startButton)
+                .queue();
+    }
+
+    private void handleEpisodeFixStartButton(ButtonInteractionEvent event) {
+        log.info("User started the episodefix flow");
+
+        TextInput searchInput = TextInput.create("search-term", "Show Name", TextInputStyle.SHORT)
+                .setPlaceholder("Enter the show name as it appears in your library")
+                .setRequired(true)
+                .setMinLength(1)
+                .setMaxLength(100)
+                .build();
+
+        Modal modal = Modal.create("joenet:episodefix:search", "Find a Show to Repair")
+                .addActionRow(searchInput)
+                .build();
+
+        event.replyModal(modal).queue();
+    }
+
+    private void handleEpisodeFixSearchModal(ModalInteractionEvent event) {
+        String searchTerm = event.getValue("search-term").getAsString().trim();
+        log.info("Searching library for show to repair: {}", searchTerm);
+
+        event.deferReply(true).queue();
+
+        List<SonarrSeriesDto> matches = sonarrService.searchLibrarySeries(searchTerm);
+
+        if (matches.isEmpty()) {
+            event.getHook().editOriginal(
+                    String.format("❌ No matching show found in your library for '%s'. " +
+                            "Only shows already added to Sonarr can be repaired.", searchTerm)
+            ).queue();
+            return;
+        }
+
+        if (matches.size() == 1) {
+            SonarrSeriesDto series = matches.get(0);
+            presentSeasonGapMenu(event.getHook(), series.getId(), series.getTitle());
+            return;
+        }
+
+        StringSelectMenu.Builder menuBuilder = StringSelectMenu.create("joenet:episodefix:select")
+                .setPlaceholder("Select a show to check")
+                .setMinValues(1)
+                .setMaxValues(1);
+
+        for (SonarrSeriesDto series : matches) {
+            String value = series.getId() + ":" + truncate(series.getTitle(), 90);
+            menuBuilder.addOption(truncate(series.getTitle(), 100), value);
+        }
+
+        event.getHook().editOriginal(
+                        String.format("Found %d show(s) in your library for '%s':", matches.size(), searchTerm))
+                .setActionRow(menuBuilder.build())
+                .queue();
+    }
+
+    private void handleEpisodeFixSeriesSelection(StringSelectInteractionEvent event) {
+        String selectedValue = event.getValues().get(0);
+        log.info("User selected library series for episodefix: {}", selectedValue);
+
+        String[] parts = selectedValue.split(":", 2);
+        int sonarrSeriesId;
+        try {
+            sonarrSeriesId = Integer.parseInt(parts[0]);
+        } catch (NumberFormatException e) {
+            event.reply("❌ Invalid show selection.").setEphemeral(true).queue();
+            return;
+        }
+        String seriesTitle = parts.length > 1 ? parts[1] : "this show";
+
+        event.deferReply(true).queue();
+        presentSeasonGapMenu(event.getHook(), sonarrSeriesId, seriesTitle);
+    }
+
+    /**
+     * Fetches every episode for the series, groups the ones that are monitored but missing a
+     * file by season, and either reports an all-clear or presents a season picker so the user
+     * can trigger a re-search for just the affected season(s).
+     */
+    private void presentSeasonGapMenu(InteractionHook hook, int sonarrSeriesId, String seriesTitle) {
+        List<EpisodeDto> episodes = sonarrService.getEpisodes(sonarrSeriesId);
+
+        Map<Integer, Integer> missingBySeason = new TreeMap<>();
+        for (EpisodeDto ep : episodes) {
+            if (ep.getSeasonNumber() == null || ep.getSeasonNumber() <= 0
+                    || !ep.isMonitored() || ep.isHasFile()) {
+                continue;
+            }
+            missingBySeason.merge(ep.getSeasonNumber(), 1, Integer::sum);
+        }
+
+        if (missingBySeason.isEmpty()) {
+            hook.editOriginal(
+                    String.format("✅ **%s** has no missing episodes — every monitored episode has a file.",
+                            seriesTitle)
+            ).queue();
+            return;
+        }
+
+        StringSelectMenu.Builder menuBuilder = StringSelectMenu
+                .create("joenet:episodefix:seasons:" + sonarrSeriesId + ":" + truncateForId(seriesTitle))
+                .setPlaceholder("Select season(s) to re-search")
+                .setMinValues(1)
+                .setMaxValues(Math.min(missingBySeason.size() + 1, 25));
+
+        menuBuilder.addOption("All affected seasons", "all",
+                String.format("%d season(s) with missing episodes", missingBySeason.size()));
+
+        int added = 0;
+        for (Map.Entry<Integer, Integer> entry : missingBySeason.entrySet()) {
+            if (added >= 24) {
+                break;
+            }
+            menuBuilder.addOption(
+                    "Season " + entry.getKey() + " — " + entry.getValue() + " missing",
+                    String.valueOf(entry.getKey()));
+            added++;
+        }
+
+        hook.editOriginal(String.format(
+                        "**%s** has missing episodes in %d season(s). Select which to re-search:",
+                        seriesTitle, missingBySeason.size()))
+                .setActionRow(menuBuilder.build())
+                .queue();
+    }
+
+    /**
+     * Handles the season-picker selection: gathers the missing episode IDs for the chosen
+     * season(s) and triggers a Sonarr episode search for exactly those.
+     * Component ID format: joenet:episodefix:seasons:{sonarrSeriesId}:{seriesTitle}
+     */
+    private void handleEpisodeFixSeasonSelection(StringSelectInteractionEvent event) {
+        String selectId = event.getComponentId();
+        String[] parts = selectId.split(":", 5);
+        if (parts.length != 5) {
+            event.reply("❌ Invalid selection.").setEphemeral(true).queue();
+            return;
+        }
+
+        int sonarrSeriesId;
+        try {
+            sonarrSeriesId = Integer.parseInt(parts[3]);
+        } catch (NumberFormatException e) {
+            event.reply("❌ Invalid show ID.").setEphemeral(true).queue();
+            return;
+        }
+        String seriesTitle = parts[4];
+        List<String> selectedValues = event.getValues();
+
+        event.deferReply(true).queue();
+
+        List<EpisodeDto> missing = sonarrService.getEpisodes(sonarrSeriesId).stream()
+                .filter(ep -> ep.getSeasonNumber() != null && ep.getSeasonNumber() > 0
+                        && ep.isMonitored() && !ep.isHasFile())
+                .collect(Collectors.toList());
+
+        List<EpisodeDto> targeted;
+        if (selectedValues.contains("all")) {
+            targeted = missing;
+        } else {
+            List<Integer> selectedSeasons = selectedValues.stream()
+                    .map(Integer::parseInt)
+                    .collect(Collectors.toList());
+            targeted = missing.stream()
+                    .filter(ep -> selectedSeasons.contains(ep.getSeasonNumber()))
+                    .collect(Collectors.toList());
+        }
+
+        if (targeted.isEmpty()) {
+            event.getHook().editOriginal(
+                    "✅ Nothing to search — those season(s) have no missing episodes."
+            ).queue();
+            return;
+        }
+
+        List<Integer> episodeIds = targeted.stream().map(EpisodeDto::getId).collect(Collectors.toList());
+        long seasonCount = targeted.stream().map(EpisodeDto::getSeasonNumber).distinct().count();
+
+        boolean success = sonarrService.triggerEpisodeSearch(episodeIds);
+
+        if (success) {
+            event.getHook().editOriginal(String.format(
+                    "🔎 Triggered a search for %d missing episode(s) across %d season(s) of **%s**. " +
+                            "Check `/joenet status` shortly.",
+                    episodeIds.size(), seasonCount, seriesTitle)
+            ).queue();
+        } else {
+            event.getHook().editOriginal(
+                    "❌ Failed to trigger search — there was an error communicating with Sonarr."
             ).queue();
         }
     }
