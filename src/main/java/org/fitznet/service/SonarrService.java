@@ -270,6 +270,94 @@ public class SonarrService {
     }
 
     /**
+     * Searches the Sonarr library (series already added, not the external lookup used by
+     * {@link #searchSeries}) for titles matching the given term.
+     *
+     * @param searchTerm the text to match against series titles (case-insensitive substring)
+     * @return list of up to 10 matching library series, or empty list on error
+     */
+    public List<SonarrSeriesDto> searchLibrarySeries(String searchTerm) {
+        try {
+            String url = baseUrl + "/series";
+            log.info("Searching Sonarr library for series: {}", searchTerm);
+
+            HttpHeaders headers = new HttpHeaders();
+            headers.set("X-Api-Key", apiKey);
+            HttpEntity<String> entity = new HttpEntity<>(headers);
+
+            ResponseEntity<SonarrSeriesDto[]> response = restTemplate.exchange(
+                    URI.create(url),
+                    HttpMethod.GET,
+                    entity,
+                    SonarrSeriesDto[].class
+            );
+
+            if (response.getBody() == null) {
+                log.warn("Sonarr library series endpoint returned null body");
+                return new ArrayList<>();
+            }
+
+            String needle = searchTerm.toLowerCase();
+            List<SonarrSeriesDto> matches = Arrays.stream(response.getBody())
+                    .filter(s -> s.getTitle() != null && s.getTitle().toLowerCase().contains(needle))
+                    .collect(java.util.stream.Collectors.toList());
+
+            log.info("Found {} library series matching: {}", matches.size(), searchTerm);
+            return matches.size() > 10 ? matches.subList(0, 10) : matches;
+
+        } catch (Exception e) {
+            log.error("Error searching Sonarr library for term '{}': {}", searchTerm, e.getMessage(), e);
+            return new ArrayList<>();
+        }
+    }
+
+    /**
+     * Retrieves all episodes for a series already in the Sonarr library, across every season.
+     *
+     * @param sonarrSeriesId the internal Sonarr series ID (from {@link #getSeriesByTvdbId} or
+     *                       {@link #searchLibrarySeries})
+     * @return list of episodes sorted by season then episode number, or empty list on error
+     */
+    public List<EpisodeDto> getEpisodes(int sonarrSeriesId) {
+        try {
+            URI url = UriComponentsBuilder
+                    .fromHttpUrl(baseUrl + "/episode")
+                    .queryParam("seriesId", sonarrSeriesId)
+                    .build()
+                    .encode()
+                    .toUri();
+            log.info("Fetching all episodes for Sonarr series ID {}", sonarrSeriesId);
+
+            HttpHeaders headers = new HttpHeaders();
+            headers.set("X-Api-Key", apiKey);
+            HttpEntity<String> entity = new HttpEntity<>(headers);
+
+            ResponseEntity<EpisodeDto[]> response = restTemplate.exchange(
+                    url,
+                    HttpMethod.GET,
+                    entity,
+                    EpisodeDto[].class
+            );
+
+            if (response.getBody() == null) {
+                log.warn("Sonarr episode endpoint returned null body");
+                return new ArrayList<>();
+            }
+
+            List<EpisodeDto> episodes = new ArrayList<>(Arrays.asList(response.getBody()));
+            episodes.sort(Comparator
+                    .comparingInt((EpisodeDto e) -> e.getSeasonNumber() != null ? e.getSeasonNumber() : 0)
+                    .thenComparingInt(e -> e.getEpisodeNumber() != null ? e.getEpisodeNumber() : 0));
+            log.info("Found {} episodes for series ID {}", episodes.size(), sonarrSeriesId);
+            return episodes;
+
+        } catch (Exception e) {
+            log.error("Error fetching all episodes for series ID {}: {}", sonarrSeriesId, e.getMessage(), e);
+            return new ArrayList<>();
+        }
+    }
+
+    /**
      * Retrieves all episodes for a specific season of a series already in the Sonarr library.
      *
      * @param sonarrSeriesId the internal Sonarr series ID (from {@link #getSeriesByTvdbId})
