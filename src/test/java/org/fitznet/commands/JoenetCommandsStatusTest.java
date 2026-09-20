@@ -187,6 +187,140 @@ class JoenetCommandsStatusTest {
         MessageEmbed embed = captor.getValue();
         assertThat(embed.getFields().get(0).getValue()).isEqualTo("✅ Queue is empty");
         assertThat(embed.getFields().get(1).getValue()).isEqualTo("✅ Queue is empty");
+        assertThat(embed.getFooter().getText()).isEqualTo("All caught up ✅");
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void testStatusCommand_QueuedItemsCollapseToCount() {
+        List<SonarrQueueItemDto> sonarrItems = Arrays.asList(
+                createSonarrItem("Law & Order SVU S02E09", "queued", 400_000.0, 400_000.0),
+                createSonarrItem("Law & Order SVU S02E03", "queued", 400_000.0, 400_000.0),
+                createSonarrItem("Law & Order SVU S05E25", "queued", 400_000.0, 400_000.0)
+        );
+        when(radarrService.getQueueDetails()).thenReturn(Collections.emptyList());
+        when(sonarrService.getQueueDetails()).thenReturn(sonarrItems);
+
+        joenetCommands.onSlashCommandInteraction(event);
+
+        ArgumentCaptor<MessageEmbed> captor = ArgumentCaptor.forClass(MessageEmbed.class);
+        verify(hook).editOriginalEmbeds(captor.capture());
+        String sonarrField = captor.getValue().getFields().get(1).getValue();
+
+        assertThat(sonarrField).contains("⏳ Queued — 3 titles waiting");
+        assertThat(sonarrField).doesNotContain("Law & Order SVU S02E09");
+        assertThat(sonarrField).doesNotContain("Law & Order SVU S02E03");
+        assertThat(sonarrField).doesNotContain("Law & Order SVU S05E25");
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void testStatusCommand_MultipleDownloadingItemsGroupedUnderHeader() {
+        List<SonarrQueueItemDto> sonarrItems = Arrays.asList(
+                createSonarrItem("Law & Order SVU S02E09", "downloading", 1_000_000.0, 380_000.0),
+                createSonarrItem("Law & Order SVU S05E04", "downloading", 1_000_000.0, 820_000.0)
+        );
+        when(radarrService.getQueueDetails()).thenReturn(Collections.emptyList());
+        when(sonarrService.getQueueDetails()).thenReturn(sonarrItems);
+
+        joenetCommands.onSlashCommandInteraction(event);
+
+        ArgumentCaptor<MessageEmbed> captor = ArgumentCaptor.forClass(MessageEmbed.class);
+        verify(hook).editOriginalEmbeds(captor.capture());
+        String sonarrField = captor.getValue().getFields().get(1).getValue();
+
+        assertThat(sonarrField).contains("Downloading (2)");
+        assertThat(sonarrField).contains("Law & Order SVU S02E09");
+        assertThat(sonarrField).contains("Law & Order SVU S05E04");
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void testStatusCommand_SingleWarningItemShowsStalled() {
+        List<RadarrQueueItemDto> radarrItems = Arrays.asList(
+                createRadarrItem("Love Hurts 2025 1080p BluRay", "warning", 1_000_000.0, 1_000_000.0)
+        );
+        when(radarrService.getQueueDetails()).thenReturn(radarrItems);
+        when(sonarrService.getQueueDetails()).thenReturn(Collections.emptyList());
+
+        joenetCommands.onSlashCommandInteraction(event);
+
+        ArgumentCaptor<MessageEmbed> captor = ArgumentCaptor.forClass(MessageEmbed.class);
+        verify(hook).editOriginalEmbeds(captor.capture());
+        String radarrField = captor.getValue().getFields().get(0).getValue();
+
+        assertThat(radarrField).contains("Love Hurts 2025 1080p BluRay");
+        assertThat(radarrField).contains("stalled at 0%");
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void testStatusCommand_EmbedColorRedWhenFailedItemPresent() {
+        List<RadarrQueueItemDto> radarrItems = Arrays.asList(
+                createRadarrItem("Broken Download", "failed", 1_000_000.0, 1_000_000.0)
+        );
+        when(radarrService.getQueueDetails()).thenReturn(radarrItems);
+        when(sonarrService.getQueueDetails()).thenReturn(Collections.emptyList());
+
+        joenetCommands.onSlashCommandInteraction(event);
+
+        ArgumentCaptor<MessageEmbed> captor = ArgumentCaptor.forClass(MessageEmbed.class);
+        verify(hook).editOriginalEmbeds(captor.capture());
+        assertThat(captor.getValue().getColorRaw() & 0xFFFFFF).isEqualTo(0xE74C3C);
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void testStatusCommand_EmbedColorOrangeWhenOnlyWarningPresent() {
+        List<RadarrQueueItemDto> radarrItems = Arrays.asList(
+                createRadarrItem("Iffy Download", "warning", 1_000_000.0, 1_000_000.0)
+        );
+        when(radarrService.getQueueDetails()).thenReturn(radarrItems);
+        when(sonarrService.getQueueDetails()).thenReturn(Collections.emptyList());
+
+        joenetCommands.onSlashCommandInteraction(event);
+
+        ArgumentCaptor<MessageEmbed> captor = ArgumentCaptor.forClass(MessageEmbed.class);
+        verify(hook).editOriginalEmbeds(captor.capture());
+        assertThat(captor.getValue().getColorRaw() & 0xFFFFFF).isEqualTo(0xE67E22);
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void testStatusCommand_EmbedColorBlueWhenOnlyDownloadingOrQueued() {
+        List<RadarrQueueItemDto> radarrItems = Arrays.asList(
+                createRadarrItem("Normal Download", "downloading", 1_000_000.0, 400_000.0)
+        );
+        when(radarrService.getQueueDetails()).thenReturn(radarrItems);
+        when(sonarrService.getQueueDetails()).thenReturn(Collections.emptyList());
+
+        joenetCommands.onSlashCommandInteraction(event);
+
+        ArgumentCaptor<MessageEmbed> captor = ArgumentCaptor.forClass(MessageEmbed.class);
+        verify(hook).editOriginalEmbeds(captor.capture());
+        assertThat(captor.getValue().getColorRaw() & 0xFFFFFF).isEqualTo(0x3498DB);
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void testStatusCommand_FooterSummarizesCounts() {
+        List<RadarrQueueItemDto> radarrItems = Arrays.asList(
+                createRadarrItem("Warning Movie", "warning", 1_000_000.0, 1_000_000.0)
+        );
+        List<SonarrQueueItemDto> sonarrItems = Arrays.asList(
+                createSonarrItem("Downloading Show", "downloading", 1_000_000.0, 400_000.0),
+                createSonarrItem("Queued Show A", "queued", 400_000.0, 400_000.0),
+                createSonarrItem("Queued Show B", "queued", 400_000.0, 400_000.0)
+        );
+        when(radarrService.getQueueDetails()).thenReturn(radarrItems);
+        when(sonarrService.getQueueDetails()).thenReturn(sonarrItems);
+
+        joenetCommands.onSlashCommandInteraction(event);
+
+        ArgumentCaptor<MessageEmbed> captor = ArgumentCaptor.forClass(MessageEmbed.class);
+        verify(hook).editOriginalEmbeds(captor.capture());
+        assertThat(captor.getValue().getFooter().getText())
+                .isEqualTo("1 warning · 1 downloading · 2 queued");
     }
 
     // ── helpers ─────────────────────────────────────────────────────────────────

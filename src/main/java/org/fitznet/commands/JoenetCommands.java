@@ -43,6 +43,7 @@ import org.springframework.stereotype.Component;
 
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.TreeMap;
@@ -137,112 +138,258 @@ public class JoenetCommands extends ListenerAdapter {
             sonarrError = true;
         }
 
+        QueueSectionResult radarrResult = formatQueueSection(radarrItems, radarrError);
+        QueueSectionResult sonarrResult = formatQueueSection(sonarrItems, sonarrError);
+
         EmbedBuilder embed = new EmbedBuilder();
         embed.setTitle("JoeNet Download Queue");
-        embed.setColor(Color.decode("#3498DB"));
+        embed.setColor(resolveEmbedColor(radarrResult, sonarrResult));
 
-        String radarrField = formatQueueSection(radarrItems, radarrError);
-        String sonarrField = formatQueueSection(sonarrItems, sonarrError);
-
-        embed.addField("🎬 Radarr (Movies)", radarrField, false);
-        embed.addField("📺 Sonarr (TV Shows)", sonarrField, false);
-        embed.setFooter("JoeNet Download Status");
+        embed.addField("🎬 Radarr (Movies)", radarrResult.text(), false);
+        embed.addField("📺 Sonarr (TV Shows)", sonarrResult.text(), false);
+        embed.setFooter(buildFooterSummary(radarrResult, sonarrResult));
 
         event.getHook().editOriginalEmbeds(embed.build()).queue();
     }
 
-    private String formatQueueSection(List<?> items, boolean error) {
-        if (error) {
-            return "⚠️ Service unavailable";
+    private Color resolveEmbedColor(QueueSectionResult radarr, QueueSectionResult sonarr) {
+        if (radarr.serviceError() || sonarr.serviceError()) {
+            return Color.decode("#E74C3C"); // red — a service is unreachable, needs attention
         }
-        if (items == null || items.isEmpty()) {
-            return "✅ Queue is empty";
+        int failed = radarr.failedCount() + sonarr.failedCount();
+        if (failed > 0) {
+            return Color.decode("#E74C3C"); // red
+        }
+        int warning = radarr.warningCount() + sonarr.warningCount();
+        if (warning > 0) {
+            return Color.decode("#E67E22"); // orange
+        }
+        int active = radarr.downloadingCount() + radarr.queuedCount() + radarr.pausedCount()
+                + sonarr.downloadingCount() + sonarr.queuedCount() + sonarr.pausedCount();
+        if (active > 0) {
+            return Color.decode("#3498DB"); // blue — business as usual
+        }
+        return Color.decode("#2ECC71"); // green — everything caught up
+    }
+
+    private String buildFooterSummary(QueueSectionResult radarr, QueueSectionResult sonarr) {
+        int warning = radarr.warningCount() + sonarr.warningCount();
+        int failed = radarr.failedCount() + sonarr.failedCount();
+        int downloading = radarr.downloadingCount() + sonarr.downloadingCount();
+        int paused = radarr.pausedCount() + sonarr.pausedCount();
+        int queued = radarr.queuedCount() + sonarr.queuedCount();
+
+        List<String> parts = new ArrayList<>();
+        if (failed > 0) parts.add(failed + " failed");
+        if (warning > 0) parts.add(warning + " warning" + (warning == 1 ? "" : "s"));
+        if (downloading > 0) parts.add(downloading + " downloading");
+        if (paused > 0) parts.add(paused + " paused");
+        if (queued > 0) parts.add(queued + " queued");
+
+        if (parts.isEmpty()) {
+            return "All caught up ✅";
+        }
+        return String.join(" · ", parts);
+    }
+
+    /**
+     * Rendered text for a Radarr/Sonarr queue field, plus per-status counts used
+     * to drive the embed color and footer summary.
+     */
+    private record QueueSectionResult(String text, int warningCount, int failedCount,
+                                       int downloadingCount, int queuedCount,
+                                       int pausedCount, boolean serviceError) {
+        static QueueSectionResult error() {
+            return new QueueSectionResult("⚠️ Service unavailable", 0, 0, 0, 0, 0, true);
         }
 
-        List<?> activeItems = items.stream()
-                .filter(item -> {
-                    String s = item instanceof RadarrQueueItemDto r ? r.getStatus()
-                             : item instanceof SonarrQueueItemDto sq ? sq.getStatus() : null;
-                    return s == null || !s.equalsIgnoreCase("completed");
-                })
+        static QueueSectionResult empty() {
+            return new QueueSectionResult("✅ Queue is empty", 0, 0, 0, 0, 0, false);
+        }
+    }
+
+    /** A single queue item normalized across Radarr/Sonarr DTOs. */
+    private record QueueItemView(String title, String status, String trackedStatus,
+                                  Double size, Double sizeleft, String eta) {}
+
+    private static final int MAX_ACTIONABLE_ITEMS = 15;
+    private static final List<String> BUCKET_ORDER =
+            List.of("warning", "failed", "paused", "downloading", "other");
+
+    private QueueSectionResult formatQueueSection(List<?> items, boolean error) {
+        if (error) {
+            return QueueSectionResult.error();
+        }
+        if (items == null || items.isEmpty()) {
+            return QueueSectionResult.empty();
+        }
+
+        List<QueueItemView> activeItems = items.stream()
+                .map(this::toQueueItemView)
+                .filter(item -> item != null && (item.status() == null || !item.status().equalsIgnoreCase("completed")))
                 .toList();
 
         if (activeItems.isEmpty()) {
-            return "✅ Queue is empty";
+            return QueueSectionResult.empty();
         }
 
-        int cap = Math.min(activeItems.size(), 10);
+        Map<String, List<QueueItemView>> buckets = new LinkedHashMap<>();
+        for (String key : BUCKET_ORDER) {
+            buckets.put(key, new ArrayList<>());
+        }
+        List<QueueItemView> queuedItems = new ArrayList<>();
+
+        for (QueueItemView item : activeItems) {
+            String normalized = item.status() == null ? "other" : item.status().toLowerCase();
+            switch (normalized) {
+                case "queued" -> queuedItems.add(item);
+                case "warning", "failed", "paused", "downloading" -> buckets.get(normalized).add(item);
+                default -> buckets.get("other").add(item);
+            }
+        }
+
         StringBuilder sb = new StringBuilder();
+        int rendered = 0;
+        int warningCount = buckets.get("warning").size();
+        int failedCount = buckets.get("failed").size();
+        int downloadingCount = buckets.get("downloading").size();
+        int pausedCount = buckets.get("paused").size();
+        int queuedCount = queuedItems.size();
 
-        for (int i = 0; i < cap; i++) {
-            Object rawItem = activeItems.get(i);
-            String title;
-            String status;
-            String trackedStatus;
-            Double size;
-            Double sizeleft;
-            String eta;
-
-            if (rawItem instanceof RadarrQueueItemDto item) {
-                title = item.getTitle();
-                status = item.getStatus();
-                trackedStatus = item.getTrackedDownloadStatus();
-                size = item.getSize();
-                sizeleft = item.getSizeleft();
-                eta = item.getEstimatedCompletionTime();
-            } else if (rawItem instanceof SonarrQueueItemDto item) {
-                title = item.getTitle();
-                status = item.getStatus();
-                trackedStatus = item.getTrackedDownloadStatus();
-                size = item.getSize();
-                sizeleft = item.getSizeleft();
-                eta = item.getEstimatedCompletionTime();
-            } else {
+        for (String key : BUCKET_ORDER) {
+            List<QueueItemView> bucket = buckets.get(key);
+            if (bucket.isEmpty()) {
                 continue;
             }
 
-            String displayTitle = (title != null && title.length() > 40)
-                    ? title.substring(0, 37) + "..."
-                    : (title != null ? title : "Unknown");
-
-            String statusEmoji = getStatusEmoji(status, trackedStatus);
-
-            sb.append("• **").append(displayTitle).append("** — ").append(statusEmoji).append(" ").append(capitalise(status));
-
-            // Show download progress percentage
-            if (size != null && sizeleft != null && size > 0) {
-                double progress = (size - sizeleft) / size * 100.0;
-                sb.append(String.format(" (%.0f%%)", progress));
+            if (rendered >= MAX_ACTIONABLE_ITEMS) {
+                sb.append("*…and ").append(bucket.size()).append(" more ").append(bucketLabel(key).toLowerCase()).append("*\n");
+                continue;
             }
 
-            // Show ETA
-            if (eta != null && !eta.isEmpty()) {
-                try {
-                    OffsetDateTime etaTime = OffsetDateTime.parse(eta);
-                    Duration remaining = Duration.between(OffsetDateTime.now(), etaTime);
-                    if (!remaining.isNegative()) {
-                        long hours = remaining.toHours();
-                        long minutes = remaining.toMinutesPart();
-                        if (hours > 0) {
-                            sb.append(String.format(" — %dh %dm left", hours, minutes));
-                        } else {
-                            sb.append(String.format(" — %dm left", minutes));
-                        }
-                    }
-                } catch (Exception ignored) {
-                    // ETA not parseable — skip it
+            int remainingBudget = MAX_ACTIONABLE_ITEMS - rendered;
+            int toShow = Math.min(bucket.size(), remainingBudget);
+
+            if (bucket.size() == 1) {
+                sb.append(renderFlatLine(bucket.get(0))).append("\n");
+            } else {
+                String emoji = getStatusEmoji(key.equals("other") ? null : key, null);
+                sb.append(emoji).append(" ").append(bucketLabel(key)).append(" (").append(bucket.size()).append(")\n");
+                for (int i = 0; i < toShow; i++) {
+                    sb.append(renderIndentedLine(bucket.get(i))).append("\n");
+                }
+                if (bucket.size() > toShow) {
+                    sb.append("  *…and ").append(bucket.size() - toShow).append(" more*\n");
                 }
             }
-
-            sb.append("\n");
+            rendered += toShow;
         }
 
-        if (activeItems.size() > cap) {
-            sb.append("*…and ").append(activeItems.size() - cap).append(" more*");
+        if (!queuedItems.isEmpty()) {
+            String noun = queuedItems.size() == 1 ? "title" : "titles";
+            sb.append("⏳ Queued — ").append(queuedItems.size()).append(" ").append(noun).append(" waiting\n");
         }
 
         String result = sb.toString().trim();
-        return result.isEmpty() ? "✅ Queue is empty" : result;
+        if (result.isEmpty()) {
+            return QueueSectionResult.empty();
+        }
+        return new QueueSectionResult(result, warningCount, failedCount, downloadingCount, queuedCount, pausedCount, false);
+    }
+
+    private String bucketLabel(String key) {
+        return switch (key) {
+            case "warning" -> "Warning";
+            case "failed" -> "Failed";
+            case "paused" -> "Paused";
+            case "downloading" -> "Downloading";
+            default -> "Other";
+        };
+    }
+
+    private String renderFlatLine(QueueItemView item) {
+        String displayTitle = truncateTitle(item.title());
+        String statusEmoji = getStatusEmoji(item.status(), item.trackedStatus());
+        StringBuilder sb = new StringBuilder();
+        sb.append(statusEmoji).append(" **").append(displayTitle).append("** — ").append(capitalise(item.status()));
+
+        Double progress = computeProgress(item.size(), item.sizeleft());
+        String etaText = computeEtaText(item.eta());
+
+        if ("downloading".equalsIgnoreCase(item.status())) {
+            if (progress != null) {
+                sb.append(String.format(" — %.0f%%", progress));
+            }
+            if (etaText != null) {
+                sb.append(" — ").append(etaText);
+            }
+        } else {
+            sb.append(", stalled at ").append(progress != null ? String.format("%.0f%%", progress) : "0%");
+        }
+
+        return sb.toString();
+    }
+
+    private String renderIndentedLine(QueueItemView item) {
+        String displayTitle = truncateTitle(item.title());
+        StringBuilder sb = new StringBuilder();
+        sb.append(" • ").append(displayTitle);
+
+        Double progress = computeProgress(item.size(), item.sizeleft());
+        if (progress != null) {
+            sb.append(String.format(" — %.0f%%", progress));
+        }
+
+        String etaText = computeEtaText(item.eta());
+        if (etaText != null) {
+            sb.append(" — ").append(etaText);
+        }
+
+        return sb.toString();
+    }
+
+    private String truncateTitle(String title) {
+        return (title != null && title.length() > 40)
+                ? title.substring(0, 37) + "..."
+                : (title != null ? title : "Unknown");
+    }
+
+    private Double computeProgress(Double size, Double sizeleft) {
+        if (size != null && sizeleft != null && size > 0) {
+            return (size - sizeleft) / size * 100.0;
+        }
+        return null;
+    }
+
+    private String computeEtaText(String eta) {
+        if (eta == null || eta.isEmpty()) {
+            return null;
+        }
+        try {
+            OffsetDateTime etaTime = OffsetDateTime.parse(eta);
+            Duration remaining = Duration.between(OffsetDateTime.now(), etaTime);
+            if (remaining.isNegative()) {
+                return null;
+            }
+            long hours = remaining.toHours();
+            long minutes = remaining.toMinutesPart();
+            return hours > 0
+                    ? String.format("%dh %dm left", hours, minutes)
+                    : String.format("%dm left", minutes);
+        } catch (Exception ignored) {
+            return null;
+        }
+    }
+
+    private QueueItemView toQueueItemView(Object rawItem) {
+        if (rawItem instanceof RadarrQueueItemDto item) {
+            return new QueueItemView(item.getTitle(), item.getStatus(), item.getTrackedDownloadStatus(),
+                    item.getSize(), item.getSizeleft(), item.getEstimatedCompletionTime());
+        } else if (rawItem instanceof SonarrQueueItemDto item) {
+            return new QueueItemView(item.getTitle(), item.getStatus(), item.getTrackedDownloadStatus(),
+                    item.getSize(), item.getSizeleft(), item.getEstimatedCompletionTime());
+        }
+        return null;
     }
 
     private String getStatusEmoji(String status, String trackedStatus) {
