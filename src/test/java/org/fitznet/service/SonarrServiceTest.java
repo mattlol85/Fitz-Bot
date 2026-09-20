@@ -624,6 +624,48 @@ class SonarrServiceTest {
         assertTrue(results.isEmpty());
     }
 
+    @Test
+    void testSearchLibrarySeries_ServerError_ThrowsMediaSearchException() {
+        when(restTemplate.exchange(any(URI.class), eq(HttpMethod.GET), any(HttpEntity.class),
+                eq(SonarrSeriesDto[].class)))
+                .thenThrow(HttpServerErrorException.create(HttpStatus.SERVICE_UNAVAILABLE,
+                        "Service Unavailable", HttpHeaders.EMPTY, new byte[0], null));
+
+        assertThrows(MediaSearchException.class, () -> sonarrService.searchLibrarySeries("anything"));
+    }
+
+    @Test
+    void testSearchLibrarySeries_TooManyRequests_ThrowsMediaSearchException() {
+        when(restTemplate.exchange(any(URI.class), eq(HttpMethod.GET), any(HttpEntity.class),
+                eq(SonarrSeriesDto[].class)))
+                .thenThrow(HttpClientErrorException.create(HttpStatus.TOO_MANY_REQUESTS,
+                        "Too Many Requests", HttpHeaders.EMPTY, new byte[0], null));
+
+        assertThrows(MediaSearchException.class, () -> sonarrService.searchLibrarySeries("anything"));
+    }
+
+    @Test
+    void testSearchLibrarySeries_ConnectionFailure_ThrowsMediaSearchException() {
+        when(restTemplate.exchange(any(URI.class), eq(HttpMethod.GET), any(HttpEntity.class),
+                eq(SonarrSeriesDto[].class)))
+                .thenThrow(new ResourceAccessException("connect timed out"));
+
+        assertThrows(MediaSearchException.class, () -> sonarrService.searchLibrarySeries("anything"));
+    }
+
+    @Test
+    void testSearchLibrarySeries_NotFound_ReturnsEmptyList() {
+        when(restTemplate.exchange(any(URI.class), eq(HttpMethod.GET), any(HttpEntity.class),
+                eq(SonarrSeriesDto[].class)))
+                .thenThrow(HttpClientErrorException.create(HttpStatus.NOT_FOUND,
+                        "Not Found", HttpHeaders.EMPTY, new byte[0], null));
+
+        List<SonarrSeriesDto> results = sonarrService.searchLibrarySeries("anything");
+
+        assertNotNull(results);
+        assertTrue(results.isEmpty());
+    }
+
     // ── getEpisodes tests ────────────────────────────────────────────────────
 
     @Test
@@ -729,6 +771,48 @@ class SonarrServiceTest {
     void testGetAllEpisodes_Exception() {
         when(restTemplate.exchange(any(URI.class), eq(HttpMethod.GET), any(HttpEntity.class),
                 eq(EpisodeDto[].class))).thenThrow(new RuntimeException("Connection error"));
+
+        List<EpisodeDto> results = sonarrService.getEpisodes(42);
+
+        assertNotNull(results);
+        assertTrue(results.isEmpty());
+    }
+
+    @Test
+    void testGetAllEpisodes_ServerError_ThrowsMediaSearchException() {
+        when(restTemplate.exchange(any(URI.class), eq(HttpMethod.GET), any(HttpEntity.class),
+                eq(EpisodeDto[].class)))
+                .thenThrow(HttpServerErrorException.create(HttpStatus.SERVICE_UNAVAILABLE,
+                        "Service Unavailable", HttpHeaders.EMPTY, new byte[0], null));
+
+        assertThrows(MediaSearchException.class, () -> sonarrService.getEpisodes(42));
+    }
+
+    @Test
+    void testGetAllEpisodes_TooManyRequests_ThrowsMediaSearchException() {
+        when(restTemplate.exchange(any(URI.class), eq(HttpMethod.GET), any(HttpEntity.class),
+                eq(EpisodeDto[].class)))
+                .thenThrow(HttpClientErrorException.create(HttpStatus.TOO_MANY_REQUESTS,
+                        "Too Many Requests", HttpHeaders.EMPTY, new byte[0], null));
+
+        assertThrows(MediaSearchException.class, () -> sonarrService.getEpisodes(42));
+    }
+
+    @Test
+    void testGetAllEpisodes_ConnectionFailure_ThrowsMediaSearchException() {
+        when(restTemplate.exchange(any(URI.class), eq(HttpMethod.GET), any(HttpEntity.class),
+                eq(EpisodeDto[].class)))
+                .thenThrow(new ResourceAccessException("connect timed out"));
+
+        assertThrows(MediaSearchException.class, () -> sonarrService.getEpisodes(42));
+    }
+
+    @Test
+    void testGetAllEpisodes_NotFound_ReturnsEmptyList() {
+        when(restTemplate.exchange(any(URI.class), eq(HttpMethod.GET), any(HttpEntity.class),
+                eq(EpisodeDto[].class)))
+                .thenThrow(HttpClientErrorException.create(HttpStatus.NOT_FOUND,
+                        "Not Found", HttpHeaders.EMPTY, new byte[0], null));
 
         List<EpisodeDto> results = sonarrService.getEpisodes(42);
 

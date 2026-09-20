@@ -27,6 +27,7 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Comparator;
 import java.util.List;
+import java.util.stream.Collectors;
 
 /**
  * Service for interacting with Sonarr API to search and download TV shows.
@@ -300,11 +301,23 @@ public class SonarrService {
             String needle = searchTerm.toLowerCase();
             List<SonarrSeriesDto> matches = Arrays.stream(response.getBody())
                     .filter(s -> s.getTitle() != null && s.getTitle().toLowerCase().contains(needle))
-                    .collect(java.util.stream.Collectors.toList());
+                    .limit(10)
+                    .collect(Collectors.toList());
 
             log.info("Found {} library series matching: {}", matches.size(), searchTerm);
-            return matches.size() > 10 ? matches.subList(0, 10) : matches;
+            return matches;
 
+        } catch (HttpStatusCodeException e) {
+            if (e.getStatusCode().is5xxServerError() || e.getStatusCode().value() == 429) {
+                log.warn("Sonarr library unavailable while searching for '{}': {} {}",
+                        searchTerm, e.getStatusCode(), e.getStatusText());
+                throw new MediaSearchException("Sonarr library unavailable", e);
+            }
+            log.error("Error searching Sonarr library for term '{}': {}", searchTerm, e.getMessage(), e);
+            return new ArrayList<>();
+        } catch (ResourceAccessException e) {
+            log.warn("Sonarr unreachable while searching library for '{}': {}", searchTerm, e.getMessage());
+            throw new MediaSearchException("Sonarr unreachable", e);
         } catch (Exception e) {
             log.error("Error searching Sonarr library for term '{}': {}", searchTerm, e.getMessage(), e);
             return new ArrayList<>();
@@ -351,6 +364,18 @@ public class SonarrService {
             log.info("Found {} episodes for series ID {}", episodes.size(), sonarrSeriesId);
             return episodes;
 
+        } catch (HttpStatusCodeException e) {
+            if (e.getStatusCode().is5xxServerError() || e.getStatusCode().value() == 429) {
+                log.warn("Sonarr unavailable while fetching episodes for series ID {}: {} {}",
+                        sonarrSeriesId, e.getStatusCode(), e.getStatusText());
+                throw new MediaSearchException("Sonarr unavailable", e);
+            }
+            log.error("Error fetching all episodes for series ID {}: {}", sonarrSeriesId, e.getMessage(), e);
+            return new ArrayList<>();
+        } catch (ResourceAccessException e) {
+            log.warn("Sonarr unreachable while fetching episodes for series ID {}: {}",
+                    sonarrSeriesId, e.getMessage());
+            throw new MediaSearchException("Sonarr unreachable", e);
         } catch (Exception e) {
             log.error("Error fetching all episodes for series ID {}: {}", sonarrSeriesId, e.getMessage(), e);
             return new ArrayList<>();
