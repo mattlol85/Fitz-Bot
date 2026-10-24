@@ -19,7 +19,7 @@ A Discord bot built with Java and Spring Boot that tracks voice channel joins an
 
 ## Tech Stack
 
-- **Java 17+** with Spring Boot 3.2.6
+- **Java 17+** with Spring Boot 4.1.2
 - **JDA 5.0.0-beta.21** (Java Discord API)
 - **Jackson** with JavaTimeModule for JSON processing and LocalDateTime serialization
 - **Lombok** for clean POJOs
