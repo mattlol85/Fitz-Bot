@@ -93,3 +93,11 @@ public static final int[] DEFAULT_MILESTONES = {1, 5, 10, 25, 50, 100, 250, 500,
 ```
 Per-guild overrides stored in `GuildConfig.milestones` (null = use defaults).
 
+
+## gRPC (always alongside REST)
+
+Every JSON/plain-text REST endpoint has an equivalent RPC in `src/main/proto/fitznet/bot/v1/bot.proto`,
+implemented by `BotGrpcService` / `LogGrpcService` in `org.fitznet.grpc`, which delegate to `BotController` /
+`LogController`. When you add or change a REST endpoint, in the same PR add/adjust the RPC, the service
+method, a test in `GrpcServicesTest`, and the map in `docs/grpc.md` (Fitz-Net hub repo). Thymeleaf pages
+(`/`, `/logs`) and Discord slash commands are exempt.

@@ -1,0 +1,69 @@
+syntax = "proto3";
+
+// gRPC equivalents of BotController (/bot/*) and LogController's JSON endpoints (/logs/api/*).
+// The Thymeleaf pages (/ and /logs) have no gRPC form. No auth, same as REST.
+package fitznet.bot.v1;
+
+option java_multiple_files = true;
+option java_package = "org.fitznet.grpc.proto";
+
+service BotService {
+  // POST /bot/startup
+  rpc Startup(StartupRequest) returns (BotReply);
+  // POST /bot/force-update-commands
+  rpc ForceUpdateCommands(ForceUpdateCommandsRequest) returns (BotReply);
+  // POST /bot/register-guild-commands/{guildId}
+  rpc RegisterGuildCommands(GuildRequest) returns (BotReply);
+  // POST /bot/shutdown
+  rpc Shutdown(ShutdownRequest) returns (BotReply);
+  // GET /bot/status
+  rpc GetStatus(GetStatusRequest) returns (BotReply);
+  // POST /bot/reset-join-counts/{guildId}
+  rpc ResetJoinCounts(GuildRequest) returns (BotReply);
+}
+
+service LogService {
+  // GET /logs/api/tail?lines=
+  rpc TailLogs(TailLogsRequest) returns (LogResponse);
+  // GET /logs/api/search?query=&maxResults=
+  rpc SearchLogs(SearchLogsRequest) returns (LogResponse);
+  // GET /logs/api/level/{level}?maxResults=
+  rpc GetLogsByLevel(GetLogsByLevelRequest) returns (LogResponse);
+}
+
+message StartupRequest {}
+message ForceUpdateCommandsRequest {}
+message ShutdownRequest {}
+message GetStatusRequest {}
+
+message GuildRequest {
+  string guild_id = 1;
+}
+
+// The plain-text body the REST endpoint returns.
+message BotReply {
+  string message = 1;
+}
+
+message TailLogsRequest {
+  // defaults to 100
+  optional int32 lines = 1;
+}
+
+message SearchLogsRequest {
+  // required, case-insensitive substring
+  optional string query = 1;
+  // defaults to 100
+  optional int32 max_results = 2;
+}
+
+message GetLogsByLevelRequest {
+  string level = 1;
+  // defaults to 100
+  optional int32 max_results = 2;
+}
+
+message LogResponse {
+  repeated string lines = 1;
+  int32 total_count = 2;
+}
