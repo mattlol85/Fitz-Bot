@@ -89,7 +89,7 @@ class RadarrServiceTest {
     @Test
     void testSearchMovies_NullBody() {
         ResponseEntity<MovieSearchResponseDto[]> responseEntity =
-                new ResponseEntity<>(null, HttpStatus.OK);
+                ResponseEntity.status(HttpStatus.OK).build();
 
         when(restTemplate.exchange(any(URI.class), eq(HttpMethod.GET), any(HttpEntity.class),
                 eq(MovieSearchResponseDto[].class))).thenReturn(responseEntity);
@@ -241,7 +241,7 @@ class RadarrServiceTest {
     @Test
     void testGetQueueDetails_NullBody() {
         ResponseEntity<RadarrQueueItemDto[]> responseEntity =
-                new ResponseEntity<>(null, HttpStatus.OK);
+                ResponseEntity.status(HttpStatus.OK).build();
 
         when(restTemplate.exchange(anyString(), eq(HttpMethod.GET), any(HttpEntity.class),
                 eq(RadarrQueueItemDto[].class))).thenReturn(responseEntity);

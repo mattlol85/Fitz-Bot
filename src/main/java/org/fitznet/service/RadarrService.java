@@ -84,7 +84,7 @@ public class RadarrService {
     public List<MovieSearchResponseDto> searchMovies(String searchTerm) {
         try {
             URI url = UriComponentsBuilder
-                    .fromHttpUrl(baseUrl + "/movie/lookup")
+                    .fromUriString(baseUrl + "/movie/lookup")
                     .queryParam("term", searchTerm)
                     .build()
                     .encode()

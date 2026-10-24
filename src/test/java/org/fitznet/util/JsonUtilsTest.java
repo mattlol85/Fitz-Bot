@@ -1,7 +1,8 @@
 package org.fitznet.util;
 
-import com.fasterxml.jackson.core.type.TypeReference;
-import com.fasterxml.jackson.databind.ObjectMapper;
+import tools.jackson.core.type.TypeReference;
+import tools.jackson.databind.ObjectMapper;
+import tools.jackson.databind.json.JsonMapper;
 import lombok.extern.slf4j.Slf4j;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -45,7 +46,7 @@ public class JsonUtilsTest {
     @Test
     void testJsonUtilsMapper() {
         assertNotNull(JsonUtils.MAPPER);
-        assertSame(ObjectMapper.class, JsonUtils.MAPPER.getClass());
+        assertSame(JsonMapper.class, JsonUtils.MAPPER.getClass());
     }
 
 }

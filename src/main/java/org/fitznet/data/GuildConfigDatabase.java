@@ -1,6 +1,7 @@
 package org.fitznet.data;
 
-import com.fasterxml.jackson.core.type.TypeReference;
+import tools.jackson.core.JacksonException;
+import tools.jackson.core.type.TypeReference;
 import lombok.extern.slf4j.Slf4j;
 import org.fitznet.data.model.GuildConfig;
 import org.fitznet.util.Constants;
@@ -92,7 +93,7 @@ public class GuildConfigDatabase {
                     log.info("Config file exists but is empty: {}", file.getAbsolutePath());
                 }
             }
-        } catch (IOException e) {
+        } catch (IOException | JacksonException e) {
             log.error("Failed to load guild configurations from {}. Starting with empty configs.", configFile, e);
         }
     }
@@ -104,7 +105,7 @@ public class GuildConfigDatabase {
         try {
             JsonUtils.MAPPER.writeValue(new File(configFile), guildConfigs);
             log.debug("Guild configurations saved successfully");
-        } catch (IOException e) {
+        } catch (JacksonException e) {
             log.warn("Failed to save guild configurations", e);
         }
     }

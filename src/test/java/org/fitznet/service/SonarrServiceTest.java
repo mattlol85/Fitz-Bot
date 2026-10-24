@@ -443,7 +443,7 @@ class SonarrServiceTest {
     @Test
     void testGetQueueDetails_NullBody() {
         ResponseEntity<SonarrQueueItemDto[]> responseEntity =
-                new ResponseEntity<>(null, HttpStatus.OK);
+                ResponseEntity.status(HttpStatus.OK).build();
 
         when(restTemplate.exchange(anyString(), eq(HttpMethod.GET), any(HttpEntity.class),
                 eq(SonarrQueueItemDto[].class))).thenReturn(responseEntity);
@@ -515,7 +515,7 @@ class SonarrServiceTest {
     @Test
     void testGetSeriesByTvdbId_NullBody() {
         ResponseEntity<SonarrSeriesDto[]> responseEntity =
-                new ResponseEntity<>(null, HttpStatus.OK);
+                ResponseEntity.status(HttpStatus.OK).build();
 
         when(restTemplate.exchange(any(URI.class), eq(HttpMethod.GET), any(HttpEntity.class),
                 eq(SonarrSeriesDto[].class))).thenReturn(responseEntity);
@@ -602,7 +602,7 @@ class SonarrServiceTest {
     @Test
     void testSearchLibrarySeries_NullBody() {
         ResponseEntity<SonarrSeriesDto[]> responseEntity =
-                new ResponseEntity<>(null, HttpStatus.OK);
+                ResponseEntity.status(HttpStatus.OK).build();
 
         when(restTemplate.exchange(any(URI.class), eq(HttpMethod.GET), any(HttpEntity.class),
                 eq(SonarrSeriesDto[].class))).thenReturn(responseEntity);
@@ -705,7 +705,7 @@ class SonarrServiceTest {
     @Test
     void testGetEpisodes_NullBody() {
         ResponseEntity<EpisodeDto[]> responseEntity =
-                new ResponseEntity<>(null, HttpStatus.OK);
+                ResponseEntity.status(HttpStatus.OK).build();
 
         when(restTemplate.exchange(any(URI.class), eq(HttpMethod.GET), any(HttpEntity.class),
                 eq(EpisodeDto[].class))).thenReturn(responseEntity);
@@ -756,7 +756,7 @@ class SonarrServiceTest {
     @Test
     void testGetAllEpisodes_NullBody() {
         ResponseEntity<EpisodeDto[]> responseEntity =
-                new ResponseEntity<>(null, HttpStatus.OK);
+                ResponseEntity.status(HttpStatus.OK).build();
 
         when(restTemplate.exchange(any(URI.class), eq(HttpMethod.GET), any(HttpEntity.class),
                 eq(EpisodeDto[].class))).thenReturn(responseEntity);

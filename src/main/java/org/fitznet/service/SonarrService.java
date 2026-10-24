@@ -90,7 +90,7 @@ public class SonarrService {
     public List<SeriesSearchResponseDto> searchSeries(String searchTerm) {
         try {
             URI url = UriComponentsBuilder
-                    .fromHttpUrl(baseUrl + "/series/lookup")
+                    .fromUriString(baseUrl + "/series/lookup")
                     .queryParam("term", searchTerm)
                     .build()
                     .encode()
@@ -237,7 +237,7 @@ public class SonarrService {
     public SonarrSeriesDto getSeriesByTvdbId(int tvdbId) {
         try {
             URI url = UriComponentsBuilder
-                    .fromHttpUrl(baseUrl + "/series")
+                    .fromUriString(baseUrl + "/series")
                     .queryParam("tvdbId", tvdbId)
                     .build()
                     .encode()
@@ -334,7 +334,7 @@ public class SonarrService {
     public List<EpisodeDto> getEpisodes(int sonarrSeriesId) {
         try {
             URI url = UriComponentsBuilder
-                    .fromHttpUrl(baseUrl + "/episode")
+                    .fromUriString(baseUrl + "/episode")
                     .queryParam("seriesId", sonarrSeriesId)
                     .build()
                     .encode()
@@ -392,7 +392,7 @@ public class SonarrService {
     public List<EpisodeDto> getEpisodes(int sonarrSeriesId, int seasonNumber) {
         try {
             URI url = UriComponentsBuilder
-                    .fromHttpUrl(baseUrl + "/episode")
+                    .fromUriString(baseUrl + "/episode")
                     .queryParam("seriesId", sonarrSeriesId)
                     .queryParam("seasonNumber", seasonNumber)
                     .build()
