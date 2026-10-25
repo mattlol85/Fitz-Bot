@@ -50,7 +50,9 @@ class GuildConfigDatabaseTest {
                 mainConfigFile.delete();
             }
             // Remove the data directory if it's empty
-            if (mainDataDir.list() != null && mainDataDir.list().length == 0) {
+            // list() is null if another parallel test removed the directory in the meantime
+            String[] remaining = mainDataDir.list();
+            if (remaining != null && remaining.length == 0) {
                 mainDataDir.delete();
             }
         }
