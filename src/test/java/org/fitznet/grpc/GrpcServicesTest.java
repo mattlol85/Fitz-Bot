@@ -2,8 +2,10 @@ package org.fitznet.grpc;
 
 import io.grpc.ManagedChannel;
 import io.grpc.ManagedChannelBuilder;
+import io.grpc.Metadata;
 import io.grpc.Status;
 import io.grpc.StatusRuntimeException;
+import io.grpc.stub.MetadataUtils;
 import org.fitznet.grpc.proto.BotServiceGrpc;
 import org.fitznet.grpc.proto.GetLogsByLevelRequest;
 import org.fitznet.grpc.proto.GetStatusRequest;
@@ -30,6 +32,7 @@ import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
+import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -73,6 +76,21 @@ class GrpcServicesTest {
     @AfterEach
     void tearDown() {
         channel.shutdownNow();
+    }
+
+    @Test
+    void correlationIdIsEchoedInResponseHeaders() {
+        Metadata.Key<String> key = Metadata.Key.of("x-correlation-id", Metadata.ASCII_STRING_MARSHALLER);
+        Metadata sent = new Metadata();
+        sent.put(key, "trace-abc-123");
+        AtomicReference<Metadata> received = new AtomicReference<>();
+        when(botService.getStatus()).thenReturn("Bot is running.");
+        BotServiceGrpc.newBlockingStub(channel)
+                .withInterceptors(
+                        MetadataUtils.newAttachHeadersInterceptor(sent),
+                        MetadataUtils.newCaptureMetadataInterceptor(received, new AtomicReference<>()))
+                .getStatus(GetStatusRequest.getDefaultInstance());
+        assertEquals("trace-abc-123", received.get().get(key));
     }
 
     @Test
